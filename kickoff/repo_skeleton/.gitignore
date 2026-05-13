@@ -1,0 +1,57 @@
+# Secrets et credentials
+.env
+.env.local
+*.pem
+*.key
+service_account*.json
+credentials*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environnements virtuels
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Données et outputs (TRES IMPORTANT : pas de PII dans le repo)
+data/
+recordings/
+transcripts/
+output/
+audits_ia/
+*.mp3
+*.wav
+*.csv.gz
+
+# Docker
+.docker/
+
+# Logs
+*.log
+logs/
+
+# Postgres local data
+postgres_data/
+minio_data/

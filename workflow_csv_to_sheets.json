@@ -1,0 +1,264 @@
+{
+  "name": "Dialoga - CSV Sheets to OpenRouter to Google Sheets",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "node-trigger",
+      "name": "Start Manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dialoga-csv-pipeline",
+        "responseMode": "onReceived",
+        "responseData": "={\"message\":\"Workflow CSV started\"}",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook (Python)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [0, 200],
+      "webhookId": "dialoga-csv-pipeline"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "returnAll": true,
+        "filter": {
+          "driveId": { "__rl": true, "mode": "list", "value": "My Drive" },
+          "folderId": { "__rl": true, "mode": "id", "value": "1w-dmQQHOMAcaro7R52vHZmM67cO084P1" },
+          "whatToSearch": "files"
+        },
+        "options": {}
+      },
+      "id": "node-list-files",
+      "name": "List Files in Drive Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [304, 100],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "ATsSwKqCTCsvXnGa", "name": "Google Drive account 10" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst output = [];\nfor (const it of items) {\n  const j = (it && it.json) || {};\n  const file_id = j.id;\n  const file_name = j.name || '';\n  const mimeType = j.mimeType || '';\n  if (!file_id) continue;\n  if (mimeType === 'application/vnd.google-apps.folder') continue;\n  if (mimeType === 'application/vnd.google-apps.shortcut') continue;\n\n  const meta_url = 'https://sheets.googleapis.com/v4/spreadsheets/' + file_id + '?fields=' + encodeURIComponent('sheets.properties');\n\n  output.push({ json: {\n    file_id,\n    file_name,\n    mimeType,\n    meta_url,\n  }});\n}\nreturn output;"
+      },
+      "id": "node-build-cards",
+      "name": "Build File Cards",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [592, 100]
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "id": "node-loop",
+      "name": "Loop Files",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [880, 100]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.meta_url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "id": "node-meta",
+      "name": "Get Sheet Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1168, 100],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "UQsJBYlYRMVkoRa6", "name": "Google Sheets account 9" }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const metaResponses = $input.all();\nconst loopItems = $('Loop Files').all();\n\nconst output = [];\nfor (let i = 0; i < metaResponses.length; i++) {\n  const respJson = (metaResponses[i] && metaResponses[i].json) || {};\n  const fileMeta = ((loopItems[i] && loopItems[i].json) || {});\n  const file_id = fileMeta.file_id || '';\n  const file_name = fileMeta.file_name || '';\n\n  let sheetName = 'Sheet1';\n  let lastCol = 'F';\n  const sheets = respJson.sheets || [];\n  if (sheets[0] && sheets[0].properties) {\n    sheetName = sheets[0].properties.title || 'Sheet1';\n    const colCount = (sheets[0].properties.gridProperties || {}).columnCount || 6;\n    if (colCount && colCount <= 26) {\n      lastCol = String.fromCharCode(64 + Math.min(Math.max(colCount, 6), 26));\n    }\n  }\n\n  const errorInfo = respJson.error || null;\n  const range = encodeURIComponent(sheetName + '!A1:' + lastCol);\n  const values_url = 'https://sheets.googleapis.com/v4/spreadsheets/' + file_id + '/values/' + range;\n\n  output.push({ json: {\n    file_id,\n    file_name,\n    sheet_name: sheetName,\n    last_col: lastCol,\n    values_url,\n    meta_error: errorInfo ? (errorInfo.message || JSON.stringify(errorInfo)) : '',\n  }});\n}\n\nreturn output;"
+      },
+      "id": "node-build-values-url",
+      "name": "Build Values URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1456, 100]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.values_url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "id": "node-get-values",
+      "name": "Get Sheet Values",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1744, 100],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "UQsJBYlYRMVkoRa6", "name": "Google Sheets account 9" }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function timeToSeconds(s) {\n  if (s === undefined || s === null) return 0;\n  const parts = String(s).trim().split(':').map((x) => Number(x));\n  if (parts.some((p) => !Number.isFinite(p))) return 0;\n  if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];\n  if (parts.length === 2) return parts[0]*60 + parts[1];\n  return parts[0] || 0;\n}\n\nfunction detectLanguage(text) {\n  const t = String(text || '').toLowerCase();\n  if (/\\b(bonjour|merci|monsieur|madame|s'il vous pla[iî]t|au revoir|d'accord|colis|commande|client)\\b/.test(t)) return 'fr-FR';\n  if (/\\b(hello|thanks|sir|madam|please|good ?bye|order|delivery|customer)\\b/.test(t)) return 'en-US';\n  if (/\\b(hola|gracias|se[nñ]or(a)?|por favor|adi[oó]s|pedido|cliente)\\b/.test(t)) return 'es-ES';\n  return 'fr-FR';\n}\n\nfunction findHeader(headers, names) {\n  for (const name of names) {\n    const idx = headers.indexOf(name.toLowerCase());\n    if (idx >= 0) return idx;\n  }\n  for (const name of names) {\n    const ln = name.toLowerCase();\n    for (let i = 0; i < headers.length; i++) {\n      if (headers[i].includes(ln)) return i;\n    }\n  }\n  return -1;\n}\n\nfunction makePlaceholder(file_id, file_name, reason) {\n  return {\n    file_id: file_id || '',\n    file_name: file_name || '',\n    nom_fichier: file_name || '',\n    duree_appel_secondes: 0,\n    transcript_text: '',\n    transcript_text_for_ai: '',\n    langue: 'fr-FR',\n    llm_prompt: 'Réponds uniquement avec ce JSON sans markdown: {\"categorisation\":\"Autre\",\"description\":\"Fichier non analysable: ' + (reason || 'inconnu') + '\",\"note_agent\":1,\"note_satisfaction_client\":1,\"points_amelioration\":\"Fichier source illisible\"}',\n    _placeholder: true,\n    _placeholder_reason: reason || 'unknown',\n  };\n}\n\nconst responses = $input.all();\nconst urlItems = $('Build Values URL').all();\n\nconst output = [];\n\nfor (let i = 0; i < responses.length; i++) {\n  const respItem = responses[i] || {};\n  const respJson = (respItem && respItem.json) || {};\n  const urlMeta = ((urlItems[i] && urlItems[i].json) || {});\n  const file_id = urlMeta.file_id || '';\n  const file_name = urlMeta.file_name || '';\n\n  if (respJson.error) {\n    const errMsg = (respJson.error && (respJson.error.message || JSON.stringify(respJson.error))) || 'unknown';\n    output.push({ json: makePlaceholder(file_id, file_name, 'sheets_api_error: ' + String(errMsg).slice(0, 150)) });\n    continue;\n  }\n\n  const values = respJson.values || [];\n  if (values.length < 2) {\n    output.push({ json: makePlaceholder(file_id, file_name, 'too_few_rows (' + values.length + ')') });\n    continue;\n  }\n\n  const headers = (values[0] || []).map((h) => String(h || '').replace(/^\\uFEFF/, '').trim().toLowerCase());\n  const idxSpeaker = findHeader(headers, ['speaker', 'orateur', 'locuteur', 'intervenant']);\n  const idxStart = findHeader(headers, ['start_time', 'start time', 'start', 'début', 'debut', 'heure debut']);\n  const idxEnd = findHeader(headers, ['end_time', 'end time', 'end', 'fin', 'heure fin']);\n  const idxDuration = findHeader(headers, ['duration', 'durée', 'duree']);\n  const idxText = findHeader(headers, ['text', 'texte', 'transcription', 'contenu', 'content', 'message']);\n\n  if (idxText < 0) {\n    output.push({ json: makePlaceholder(file_id, file_name, 'no_text_column [' + headers.join(',') + ']') });\n    continue;\n  }\n\n  const lines = [];\n  let totalFromRows = 0;\n  let lastEnd = 0;\n  let firstStart = -1;\n  for (let r = 1; r < values.length; r++) {\n    const row = values[r] || [];\n    const speaker = idxSpeaker >= 0 ? String(row[idxSpeaker] || '').trim() : '';\n    const text = String(row[idxText] || '').trim();\n    if (!text) continue;\n    lines.push((speaker ? speaker + ': ' : '') + text);\n    const durStr = idxDuration >= 0 ? String(row[idxDuration] || '') : '';\n    totalFromRows += parseFloat(durStr) || timeToSeconds(durStr);\n    const endStr = idxEnd >= 0 ? String(row[idxEnd] || '') : '';\n    const endSec = parseFloat(endStr) || timeToSeconds(endStr);\n    if (endSec > lastEnd) lastEnd = endSec;\n    const startStr = idxStart >= 0 ? String(row[idxStart] || '') : '';\n    const startSec = parseFloat(startStr) || timeToSeconds(startStr);\n    if (firstStart < 0 || startSec < firstStart) firstStart = startSec;\n  }\n\n  const transcript = lines.join('\\n').replace(/\\r/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim();\n  if (!transcript) {\n    output.push({ json: makePlaceholder(file_id, file_name, 'empty_transcript') });\n    continue;\n  }\n\n  let duree = lastEnd > 0 ? lastEnd - Math.max(firstStart, 0) : 0;\n  if (duree <= 0) duree = totalFromRows;\n  if (duree < 0) duree = 0;\n\n  const langue = detectLanguage(transcript);\n\n  const FAST_MAX_CHARS = 4500;\n  let chatForAi = transcript;\n  if (transcript.length > FAST_MAX_CHARS) {\n    const head = transcript.slice(0, 2700);\n    const tail = transcript.slice(-1500);\n    chatForAi = head + '\\n...\\n' + tail;\n  }\n\n  const llm_prompt = [\n    \"Analyse cette transcription d'appel téléphonique d'un service client (catalogue de vêtements/produits).\",\n    \"La transcription contient des labels génériques (S1, S2, Orateur 1, etc.). Tu dois IDENTIFIER qui est l'OPÉRATEUR (l'agent du service client) et qui est le CLIENT, puis RÉÉCRIRE la conversation avec ces labels.\",\n    \"Indices : l'opérateur pose des questions structurées (numéro client, code postal, références, etc.), le client donne ses infos personnelles. Les premiers messages automatiques (IVR : 'tapez 1, tapez 2'...) sont à ignorer ou marquer 'IVR'.\",\n    '',\n    'Retourne UNIQUEMENT un JSON valide (pas de markdown, pas de texte autour).',\n    'Format EXACT :',\n    '{',\n    '  \"categorisation\": \"Commande|Livraison|SAV|Catalogue|Réclamation|Autre\",',\n    '  \"description\": \"résumé court en 1-2 phrases\",',\n    '  \"note_agent\": 1-10,',\n    '  \"note_satisfaction_client\": 1-10,',\n    '  \"points_amelioration\": \"axes concrets d\\'amélioration pour l\\'opérateur\",',\n    '  \"conversation_relabeled\": \"OPÉRATEUR: ...\\\\nCLIENT: ...\\\\nOPÉRATEUR: ...\" (la conversation entière réécrite avec OPÉRATEUR/CLIENT, garde les phrases mais remplace les labels S1/S2/Orateur N. Sépare chaque tour de parole par un saut de ligne)',\n    '}',\n    'Contraintes : description non vide ; notes entières 1..10 ; points_amelioration non vide ; categorisation parmi les 6 valeurs ; conversation_relabeled doit contenir TOUTE la conversation reformatée.',\n    '',\n    'fichier: ' + file_name,\n    'langue: ' + langue,\n    'duree_secondes: ' + Math.round(duree),\n    '',\n    'conversation brute :',\n    chatForAi,\n  ].join('\\n');\n\n  output.push({ json: {\n    file_id,\n    file_name,\n    nom_fichier: file_name,\n    duree_appel_secondes: Math.round(duree),\n    transcript_text: transcript,\n    transcript_text_for_ai: chatForAi,\n    langue,\n    llm_prompt,\n    _placeholder: false,\n  }});\n}\n\nreturn output;"
+      },
+      "id": "node-build-transcript",
+      "name": "Build Transcript Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2032, 100],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.llm_prompt }}"
+      },
+      "id": "node-llm",
+      "name": "Audit LLM",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [2320, 100],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o-mini",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [2320, 360],
+      "id": "node-openrouter",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": { "id": "UAQqbIEe71U7ssav", "name": "OpenRouter account" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ALLOWED_CATEGORIES = ['Commande', 'Livraison', 'SAV', 'Catalogue', 'Réclamation', 'Autre'];\nconst pickFirstText = (...values) => { for (const v of values) { if (typeof v === 'string' && v.trim()) return v.trim(); } return ''; };\nconst getRawText = (json) => pickFirstText(json.text, json.output, json.response, json.answer, json.content, json.result, (json.message && json.message.content) || '');\nconst parseJsonBlock = (raw) => {\n  if (!raw) return null;\n  let t = String(raw).trim();\n  if (t.startsWith('```')) t = t.replace(/^```(?:json)?\\s*/i, '').replace(/```$/i, '').trim();\n  const a = t.indexOf('['), b = t.lastIndexOf(']');\n  if (a !== -1 && b > a) { try { return JSON.parse(t.slice(a, b+1)); } catch (e) {} }\n  const f = t.indexOf('{'), l = t.lastIndexOf('}');\n  if (f !== -1 && l > f) { try { return JSON.parse(t.slice(f, l+1)); } catch (e) {} }\n  return null;\n};\nconst clampScore = (value, fallback) => {\n  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(1, Math.min(10, Math.round(value)));\n  const m = String(value ?? '').match(/-?\\d+(?:\\.\\d+)?/);\n  if (!m) return fallback;\n  const n = Number(m[0]);\n  if (!Number.isFinite(n)) return fallback;\n  const norm = n <= 5 ? n * 2 : n;\n  return Math.max(1, Math.min(10, Math.round(norm)));\n};\nconst inferCategory = (text) => {\n  const t = String(text || '').toLowerCase();\n  if (!t) return 'Autre';\n  if (/livraison|colis|exped|retard|transport/.test(t)) return 'Livraison';\n  if (/sav|retour|panne|defect|garantie|echange/.test(t)) return 'SAV';\n  if (/reclamation|plainte|rembourse|mecontent|insatisf/.test(t)) return 'Réclamation';\n  if (/catalogue|reference|produit|taille|couleur/.test(t)) return 'Catalogue';\n  if (/commande|panier|paiement|code avantage|coupon|promo/.test(t)) return 'Commande';\n  return 'Autre';\n};\nconst normalizeCategory = (value, transcript) => {\n  const raw = String(value || '').trim();\n  if (!raw) return inferCategory(transcript);\n  const lo = raw.toLowerCase();\n  if (lo.startsWith('livr')) return 'Livraison';\n  if (lo.startsWith('sav')) return 'SAV';\n  if (lo.startsWith('cat')) return 'Catalogue';\n  if (lo.startsWith('récl') || lo.startsWith('recl') || lo.includes('claim')) return 'Réclamation';\n  if (lo.startsWith('com') || lo.includes('order')) return 'Commande';\n  if (lo.startsWith('aut')) return 'Autre';\n  if (ALLOWED_CATEGORIES.includes(raw)) return raw;\n  return inferCategory(transcript);\n};\nconst fallbackDescription = (transcript, category) => {\n  const cleaned = String(transcript || '').replace(/\\s+/g, ' ').trim().slice(0, 220);\n  if (!cleaned) return 'Analyse automatique sans transcript exploitable.';\n  return (category + ': ' + cleaned).slice(0, 240);\n};\nconst fallbackPoints = (category) => {\n  if (category === 'Commande') return \"Confirmer plus vite le besoin client et valider la solution en fin d'échange.\";\n  if (category === 'Livraison') return 'Donner un délai clair et proposer un suivi concret.';\n  if (category === 'SAV') return 'Expliquer les étapes SAV de manière structurée et vérifier la compréhension.';\n  if (category === 'Réclamation') return \"Montrer plus d'empathie et détailler la résolution avec délai.\";\n  if (category === 'Catalogue') return 'Préciser les références et reformuler les options proposées.';\n  return 'Améliorer la clarté des réponses et la reformulation des actions.';\n};\nconst responses = $input.all();\nconst bases = $('Build Transcript Data').all();\nconst now = new Date().toISOString();\nconst output = [];\nfor (let idx = 0; idx < responses.length; idx++) {\n  const responseItem = (responses[idx] && responses[idx].json) || {};\n  const base = ((bases[idx] && bases[idx].json) || {});\n  if (base._placeholder) {\n    output.push({ json: {\n      nom_fichier: 'DIAG: ' + (base.file_name || ('item_' + idx)),\n      duree_appel_secondes: 0,\n      transcript_text: 'reason=' + (base._placeholder_reason || 'unknown') + ' | file_id=' + (base.file_id || ''),\n      categorisation: 'Autre',\n      description: 'Placeholder (parse failed)',\n      note_agent: 0,\n      note_satisfaction_client: 0,\n      points_amelioration: '',\n      langue: base.langue || 'fr-FR',\n      currentDate: now,\n    }});\n    continue;\n  }\n  const transcript = base.transcript_text || '';\n  const rawText = !responseItem.error ? getRawText(responseItem) : '';\n  const parsedAny = parseJsonBlock(rawText) || {};\n  const r = Array.isArray(parsedAny) ? (parsedAny[0] || {}) : parsedAny;\n  const cat = normalizeCategory(pickFirstText(r.categorisation, r.categorie, r.category), transcript);\n  const desc = pickFirstText(r.description, r.resume, r.summary) || fallbackDescription(transcript, cat);\n  const pts = pickFirstText(r.points_amelioration, r.points_amelioration_agent, r.ameliorations, r.improvements) || fallbackPoints(cat);\n  // Utilise la conversation re-labelisée par l'IA (OPÉRATEUR/CLIENT) plutôt que le brut S1\n  let finalTranscript = pickFirstText(r.conversation_relabeled, r.conversation, r.transcript) || transcript;\n  // Tronque pour la cellule Sheet\n  if (finalTranscript.length > 4000) {\n    finalTranscript = finalTranscript.slice(0, 4000) + '...[tronqué]';\n  }\n\n  output.push({ json: {\n    nom_fichier: base.nom_fichier || base.file_name || '',\n    duree_appel_secondes: base.duree_appel_secondes || 0,\n    transcript_text: finalTranscript,\n    categorisation: cat,\n    description: desc,\n    note_agent: clampScore(r.note_agent, 7),\n    note_satisfaction_client: clampScore(r.note_satisfaction_client ?? r.note_satisfaction, 8),\n    points_amelioration: pts,\n    langue: base.langue || '',\n    currentDate: now,\n  }});\n}\nreturn output;"
+      },
+      "id": "node-format",
+      "name": "Format Résultats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2672, 100],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1vXCSt4KkBaaeOtWRgrHEJWy2HCyDMj5A9CZYeWZJiQc",
+          "mode": "id"
+        },
+        "sheetName": { "__rl": true, "value": "Claude automatisation", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "nom_fichier": "={{ $json.nom_fichier }}",
+            "duree_appel_secondes": "={{ $json.duree_appel_secondes }}",
+            "transcript_text": "={{ $json.transcript_text }}",
+            "categorisation": "={{ $json.categorisation }}",
+            "description": "={{ $json.description }}",
+            "note_agent": "={{ $json.note_agent }}",
+            "note_satisfaction_client": "={{ $json.note_satisfaction_client }}",
+            "points_amelioration": "={{ $json.points_amelioration }}",
+            "langue": "={{ $json.langue }}",
+            "currentDate": "={{ $json.currentDate }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "nom_fichier", "displayName": "nom_fichier", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "duree_appel_secondes", "displayName": "duree_appel_secondes", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "transcript_text", "displayName": "transcript_text", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "categorisation", "displayName": "categorisation", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "description", "displayName": "description", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "note_agent", "displayName": "note_agent", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "note_satisfaction_client", "displayName": "note_satisfaction_client", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "points_amelioration", "displayName": "points_amelioration", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "langue", "displayName": "langue", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "currentDate", "displayName": "currentDate", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "node-sheets",
+      "name": "Append to Destination Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [2992, 100],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "UQsJBYlYRMVkoRa6", "name": "Google Sheets account 9" }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Start Manual": {
+      "main": [[{ "node": "List Files in Drive Folder", "type": "main", "index": 0 }]]
+    },
+    "Webhook (Python)": {
+      "main": [[{ "node": "List Files in Drive Folder", "type": "main", "index": 0 }]]
+    },
+    "List Files in Drive Folder": {
+      "main": [[{ "node": "Build File Cards", "type": "main", "index": 0 }]]
+    },
+    "Build File Cards": {
+      "main": [[{ "node": "Loop Files", "type": "main", "index": 0 }]]
+    },
+    "Loop Files": {
+      "main": [
+        [],
+        [{ "node": "Get Sheet Metadata", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Sheet Metadata": {
+      "main": [[{ "node": "Build Values URL", "type": "main", "index": 0 }]]
+    },
+    "Build Values URL": {
+      "main": [[{ "node": "Get Sheet Values", "type": "main", "index": 0 }]]
+    },
+    "Get Sheet Values": {
+      "main": [[{ "node": "Build Transcript Data", "type": "main", "index": 0 }]]
+    },
+    "Build Transcript Data": {
+      "main": [[{ "node": "Audit LLM", "type": "main", "index": 0 }]]
+    },
+    "Audit LLM": {
+      "main": [[{ "node": "Format Résultats", "type": "main", "index": 0 }]]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [[{ "node": "Audit LLM", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Format Résultats": {
+      "main": [[{ "node": "Append to Destination Sheet", "type": "main", "index": 0 }]]
+    },
+    "Append to Destination Sheet": {
+      "main": [[{ "node": "Loop Files", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Nairobi",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "tags": []
+}

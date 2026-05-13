@@ -1,0 +1,40 @@
+# Atlas For Men - audit IA - dépendances Python 3.11+
+
+# LLM
+anthropic>=0.42.0
+
+# Google APIs
+google-api-python-client>=2.150.0
+google-auth>=2.36.0
+google-auth-oauthlib>=1.2.1
+google-auth-httplib2>=0.2.0
+
+# Postgres
+psycopg[binary]>=3.2.3
+sqlalchemy>=2.0.36
+
+# S3-compatible
+boto3>=1.35.0
+
+# Excel
+openpyxl>=3.1.5
+
+# Config + CLI
+python-dotenv>=1.0.1
+click>=8.1.7
+pydantic>=2.10.0
+pydantic-settings>=2.7.0
+
+# Logging
+structlog>=24.4.0
+
+# ASR (optionnels - décommenter si retranscription)
+# deepgram-sdk>=3.7.0
+# assemblyai>=0.36.0
+
+# Dev / tests
+pytest>=8.3.4
+pytest-asyncio>=0.25.0
+pytest-cov>=6.0.0
+ruff>=0.8.4
+mypy>=1.13.0

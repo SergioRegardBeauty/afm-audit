@@ -1,0 +1,93 @@
+# =========================================================
+# Atlas For Men - audit IA - .gitignore
+# RGPD : exclut TOUTES les donnees PII (transcripts, audits, recordings)
+# =========================================================
+
+# --- SECRETS ABSOLUS ---
+.env
+.env.local
+.env.*
+!.env.example
+service_account*.json
+credentials*.json
+*.pem
+*.key
+secret*.json
+api_keys.txt
+
+# --- DONNEES BRUTES (transcripts CSV Dialoga) ---
+Atlas FR - * csv*/
+Atlas EN - * csv*/
+atlas German - * csv*/
+atlas Polaand - * csv*/
+atlas Tchèque - * csv*/
+atlas Tcheque - * csv*/
+All files - * csv*/
+**/recordings/
+**/*.mp3
+**/*.wav
+**/*.opus
+**/*.m4a
+
+# --- DONNEES GENEREES (audits IA contenant PII) ---
+audits_ia/
+output/*/BQ_*.xlsx
+output/*/audits_json/
+output/*/audits_v1/
+corpus/
+gold_standard/
+dialoga_snapshot/
+
+# --- PIPELINE INTERMEDIAIRE ---
+pipeline/subagent_inputs/
+pipeline/subagent_inputs_chunks/
+pipeline/manifest.json
+
+# --- PYTHON ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- ENV VIRTUELS ---
+.venv/
+venv/
+env/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*.iml
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- DOCKER LOCAL ---
+.docker/
+postgres_data/
+minio_data/
+
+# --- LOGS / TEMP ---
+*.log
+logs/
+tmp/
+temp/
+*.bak
+*.tmp
+
+# --- BACKUPS Excel temporaires ---
+~$*.xlsx
+~$*.xls
+*.xlsx#*

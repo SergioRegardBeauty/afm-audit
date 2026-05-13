@@ -1,0 +1,470 @@
+{
+  "name": "Atlas For Men - Audit IA des appels (Claude direct)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "32abfe8a-f290-471d-993c-c1f702e8e1df",
+      "name": "Start Manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "afm-audit-pipeline",
+        "options": {}
+      },
+      "id": "f4ab1a13-c020-4d6e-8473-40a7979ab3d4",
+      "name": "Webhook trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [0, 208],
+      "webhookId": "afm-audit-pipeline"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "returnAll": true,
+        "filter": {
+          "driveId": { "__rl": true, "mode": "list", "value": "My Drive" },
+          "folderId": { "__rl": true, "value": "18PCXgbjcunjYjfgqRoab_hVPfLXwptFY", "mode": "id" },
+          "whatToSearch": "files"
+        },
+        "options": {}
+      },
+      "id": "f9a7175d-7c8c-48d0-903a-e1d759453f24",
+      "name": "List Files in Drive Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [304, 112],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "ATsSwKqCTCsvXnGa", "name": "Google Drive account 10" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detecte pays a partir du prefixe telephonique dans le nom de fichier.\nfunction detectCountryFromName(name) {\n  const n = String(name || '');\n  if (/^00330|^0033\\d/.test(n)) return { pays: 'FR', langue_appel: 'fr' };\n  if (/^00440|^0044\\d/.test(n)) return { pays: 'GB', langue_appel: 'en' };\n  if (/^00490|^0049\\d/.test(n)) return { pays: 'DE', langue_appel: 'de' };\n  if (/^00480|^0048\\d/.test(n)) return { pays: 'PL', langue_appel: 'pl' };\n  if (/^00420|^0042\\d/.test(n)) return { pays: 'CZ', langue_appel: 'cs' };\n  return { pays: 'FR', langue_appel: 'fr' };\n}\n\nconst items = $input.all();\nconst output = [];\nfor (const it of items) {\n  const j = (it && it.json) || {};\n  const file_id = j.id;\n  const file_name = j.name || '';\n  const mimeType = j.mimeType || '';\n  if (!file_id) continue;\n  if (mimeType === 'application/vnd.google-apps.folder') continue;\n  if (mimeType === 'application/vnd.google-apps.shortcut') continue;\n\n  const meta_url = 'https://sheets.googleapis.com/v4/spreadsheets/' + file_id + '?fields=' + encodeURIComponent('sheets.properties');\n  const { pays, langue_appel } = detectCountryFromName(file_name);\n  const phone = (file_name.match(/^(\\d{8,15})_/) || [])[1] || '';\n\n  output.push({ json: {\n    file_id,\n    file_name,\n    mimeType,\n    meta_url,\n    pays,\n    langue_appel,\n    n_tel: phone,\n    n_appel: file_name.replace(/\\.(mp3\\.csv|csv|mp3)$/i, ''),\n  }});\n}\nreturn output;"
+      },
+      "id": "13df65fc-562c-4280-8e70-b11c84356c78",
+      "name": "Build File Cards + detect pays",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [592, 112]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "4e83aa35-2215-4d69-9d5c-5b7f6100ea6a",
+      "name": "Loop Files (batch 5)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [880, 112]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.meta_url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "id": "7b998dc3-03e4-4789-a362-6e2cbc0343c3",
+      "name": "Get Sheet Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1168, 112],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "UQsJBYlYRMVkoRa6", "name": "Google Sheets account 9" }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const metaResponses = $input.all();\nconst loopItems = $('Loop Files (batch 5)').all();\n\nconst output = [];\nfor (let i = 0; i < metaResponses.length; i++) {\n  const respJson = (metaResponses[i] && metaResponses[i].json) || {};\n  const fileMeta = ((loopItems[i] && loopItems[i].json) || {});\n\n  let sheetName = 'Sheet1';\n  let lastCol = 'F';\n  const sheets = respJson.sheets || [];\n  if (sheets[0] && sheets[0].properties) {\n    sheetName = sheets[0].properties.title || 'Sheet1';\n    const colCount = (sheets[0].properties.gridProperties || {}).columnCount || 6;\n    if (colCount && colCount <= 26) {\n      lastCol = String.fromCharCode(64 + Math.min(Math.max(colCount, 6), 26));\n    }\n  }\n\n  const range = encodeURIComponent(sheetName + '!A1:' + lastCol);\n  const values_url = 'https://sheets.googleapis.com/v4/spreadsheets/' + fileMeta.file_id + '/values/' + range;\n\n  output.push({ json: {\n    ...fileMeta,\n    sheet_name: sheetName,\n    last_col: lastCol,\n    values_url,\n    meta_error: respJson.error ? (respJson.error.message || JSON.stringify(respJson.error)) : '',\n  }});\n}\n\nreturn output;"
+      },
+      "id": "6d86d4ee-a9c2-45aa-904d-5cb7df3b1826",
+      "name": "Build Values URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1456, 112]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.values_url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "id": "421286e1-5d3c-402f-b952-002b8e5e40aa",
+      "name": "Get Sheet Values",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1744, 112],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "UQsJBYlYRMVkoRa6", "name": "Google Sheets account 9" }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build AFM-specific audit prompt. Detecte flow (cde_tel vs sav) puis applique la bonne grille.\n\nfunction timeToSeconds(s) {\n  if (s === undefined || s === null) return 0;\n  const parts = String(s).trim().split(':').map((x) => Number(x));\n  if (parts.some((p) => !Number.isFinite(p))) return 0;\n  if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];\n  if (parts.length === 2) return parts[0]*60 + parts[1];\n  return parts[0] || 0;\n}\n\nfunction findHeader(headers, names) {\n  for (const name of names) { const idx = headers.indexOf(name.toLowerCase()); if (idx >= 0) return idx; }\n  for (const name of names) {\n    const ln = name.toLowerCase();\n    for (let i = 0; i < headers.length; i++) { if (headers[i].includes(ln)) return i; }\n  }\n  return -1;\n}\n\nfunction detectFlow(text) {\n  const t = String(text || '').toLowerCase();\n  const SAV_STRONG = /(remboursement|rembourser|annuler|reclamation|r[eé]clamation|j['ae]i pass[eé] (une )?commande|o[uù] est ma commande|suivi de ma commande|je n['ae]i pas re[cç]u|retour(ner)?|d[eé]fectueux|where is my order|i placed an?? order|refund|return my|complaint|wo ist meine bestellung|erstattung|reklamation|gdzie jest moje zam[oó]wienie|zwrot|kde je m[ée] objedn|reklamac)/;\n  if (SAV_STRONG.test(t)) return 'sav';\n  const CDE_STRONG = /(passer (une |la )?commande|je voudrais commander|c['e]?est pour passer|code avantage|place an?? order|want to order|m[oö]chte (eine )?bestell|bestellung aufgeben|z[lł]o[zż]y[cć] zam|chc[eę] zam[oó]wi|chci objednat|katalog)/;\n  if (CDE_STRONG.test(t)) return 'cde_tel';\n  return 'cde_tel';\n}\n\nfunction makePlaceholder(meta, reason) {\n  return {\n    ...meta,\n    flow: 'cde_tel',\n    duree_appel_secondes: 0,\n    transcript_text: '',\n    transcript_text_for_ai: '',\n    llm_prompt: 'Reponds avec : {\"flow\":\"cde_tel\",\"metadata\":{\"agent\":\"\",\"n_client\":\"\",\"n_cde\":\"\",\"type\":\"non auditable\",\"demande_client\":\"non auditable\"},\"criteres\":{},\"SI_detectees\":[],\"totaux\":{\"note_totale_sur_10\":null,\"note_sur_100\":null,\"note_zero_par_SI\":false},\"commentaire_global\":\"Non auditable : ' + (reason || 'inconnu') + '\",\"commentaire_traduit_fr\":\"\"}',\n    _placeholder: true,\n    _placeholder_reason: reason || 'unknown',\n  };\n}\n\nconst GRID_CDE_TEL = `15 CRITERES CDE TEL (AFM BQ_1) :\n1_accueil (max 0.5) — \"Atlas for Men, [prenom], bonjour\" complet=0.5 / partiel=0.2 / non=0 / SI si incorrect\n2_identification (max 1.0) — nom+adresse+complete fiche+confirme=1.0 / partiel=0.5 / SI si pas de fiche\n3_climat (max 0.5) — ton cordial+empathie=0.5 / partiel=0.2 / non maitrise=0 / SI si incorrect tout au long\n4_mise_en_attente (max 0.3) — annonce objet + remercie ≤1m30=0.3 / oubli=0 / NA si pas de mise en attente / SI si >3min\n5_conclusion (max 0.5) — confirme total+paiement+livraison+suite=0.5 / oubli element=0.2 / aucune=0\n6_prise_conges (max 0.5) — \"Je vous remercie M/Mme [nom] ... bonne journee de la part d'Atlas for Men\"=0.5 / non norme=0 / SI si incorrect\n7_personnalisation (max 0.5) — nom client ≥3 fois=0.5 / 1 omission=0.25 / manque=0\n8_pre_commande (max 0.5) — demande code avantage + propose=0.5 / non=0\n9_commande (max 1.2) — refs+tailles+dispo+prix=1.2 / oubli un=0.6 / pas indispo=0\n10_outils (max 0.3) — sait utiliser=0.3 / non=0\n11_coord_bancaires (max 0.2) — desactive+reactive enreg=0.2 / partial=0.1 / non=0 / SI grave si pas de desactivation lors de CB\n12_rebond_commercial (max 1.0) — 2 articles complementaires=1.0 / 1 seul=0.5 / non=0 / SI si aucune proposition possible\n13_objection (max 1.0) — analyse+identifie+traite=1.0 / a travailler=0.5 / non=0 / NA si pas d'objection / SI si non traitee\n14_ecoute_active (max 1.0) — laisse parler+acquiesce=1.0 / coupe parfois=0.5 / pas du tout=0\n15_accompagnement (max 1.0) — adapte+rassure+pas a pas=1.0 / a travailler=0.5 / aucun=0`;\n\nconst GRID_SAV = `16 CRITERES SAV (AFM BQ_4) :\n1_accueil (max 0.5) — norme=0.5 / partiel=0.2 / non=0 / SI si incorrect\n2_identification (max 1.0) — nom+adresse+complete+confirme=1.0 / partiel=0.5 / SI si rien\n3_mise_en_attente (max 0.3) — annonce+remercie ≤1m30=0.3 / oubli=0 / NA / SI si >3min\n4_conclusion (max 0.5) — resume decisions+suite+valide=0.5 / fiabilisation peu claire=0.2 / aucune=0\n5_prise_conges (max 0.5) — norme=0.5 / non norme=0.2 / non=0 / SI si incorrect\n6_personnalisation (max 0.5) — nom ≥3 fois=0.5 / 1 omission=0.25 / manque=0\n7_climat (max 1.0) — cordial+empathie+pro=1.0 / a travailler=0.5 / non maitrise=0 / SI si incorrect\n8_maitrise_directivite (max 0.5) — directivite+rebond+gere reactions=0.5 / manque=0.2 / se laisse porter=0\n9_decouverte_reformulation (max 1.0) — demande objet + REFORMULE obligatoire=1.0 / a travailler=0.5 / non=0 / SI si pas de reformulation\n10_pertinence_reponse (max 1.5) — procedure+complet+personnalise=1.5 / incomplet=0.75 / non maitrise=0 / SI si pas de reponse ou info erronee\n11_outils (max 0.5) — sait chercher=0.5 / non=0\n12_codification (max 0.5) — qualifie appel + recolte avis=0.5 / motif faux=0.2 / non=0 (souvent non observable sur transcript, alors note=0 + justification \"non observable\")\n13_delai_traitement (max 0.2) — communique delai si pas immediat=0.2 / NA si immediat / SI si delai errone ou non communique\n14_experience_client (max 1.0) — accompagnement+rassure+climat=1.0 / a travailler=0.5 / absent=0\n15_ecoute_empathie (max 0.5) — empathie+excuses+ecoute=0.5 / manque=0.25 / absent=0\n16_enchantement (max 0.5) — bonus va au-dela demande=0.5 / NA si pas d'opportunite`;\n\nconst responses = $input.all();\nconst urlItems = $('Build Values URL').all();\nconst output = [];\n\nfor (let i = 0; i < responses.length; i++) {\n  const respItem = responses[i] || {};\n  const respJson = (respItem && respItem.json) || {};\n  const meta = ((urlItems[i] && urlItems[i].json) || {});\n\n  if (respJson.error) {\n    output.push({ json: makePlaceholder(meta, 'sheets_api_error: ' + String(respJson.error.message || '').slice(0, 150)) });\n    continue;\n  }\n\n  const values = respJson.values || [];\n  if (values.length < 2) {\n    output.push({ json: makePlaceholder(meta, 'too_few_rows (' + values.length + ')') });\n    continue;\n  }\n\n  const headers = (values[0] || []).map((h) => String(h || '').replace(/^\\uFEFF/, '').trim().toLowerCase());\n  const idxSpeaker = findHeader(headers, ['speaker', 'orateur', 'locuteur', 'rečník', 'mowca']);\n  const idxStart = findHeader(headers, ['start_time', 'start time', 'start', 'debut']);\n  const idxEnd = findHeader(headers, ['end_time', 'end time', 'end', 'fin']);\n  const idxText = findHeader(headers, ['text', 'texte', 'transcription', 'contenu', 'content']);\n\n  if (idxText < 0) {\n    output.push({ json: makePlaceholder(meta, 'no_text_column [' + headers.join(',') + ']') });\n    continue;\n  }\n\n  const lines = [];\n  let lastEnd = 0, firstStart = -1;\n  for (let r = 1; r < values.length; r++) {\n    const row = values[r] || [];\n    const speaker = idxSpeaker >= 0 ? String(row[idxSpeaker] || '').trim() : '';\n    const text = String(row[idxText] || '').trim();\n    if (!text) continue;\n    const startStr = idxStart >= 0 ? String(row[idxStart] || '') : '';\n    const endStr = idxEnd >= 0 ? String(row[idxEnd] || '') : '';\n    const startSec = parseFloat(startStr) || timeToSeconds(startStr);\n    const endSec = parseFloat(endStr) || timeToSeconds(endStr);\n    if (endSec > lastEnd) lastEnd = endSec;\n    if (firstStart < 0 || startSec < firstStart) firstStart = startSec;\n    const ts = startStr ? '[' + startStr + '] ' : '';\n    lines.push(ts + (speaker ? speaker + ': ' : '') + text);\n  }\n\n  const transcript = lines.join('\\n').replace(/\\r/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim();\n  if (!transcript) {\n    output.push({ json: makePlaceholder(meta, 'empty_transcript') });\n    continue;\n  }\n\n  const flow = detectFlow(transcript);\n  const duree = lastEnd > 0 ? Math.round(lastEnd - Math.max(firstStart, 0)) : 0;\n\n  const MAX_CHARS = 8000;\n  let chatForAi = transcript;\n  if (transcript.length > MAX_CHARS) {\n    chatForAi = transcript.slice(0, 5000) + '\\n[... segment median tronque ...]\\n' + transcript.slice(-2500);\n  }\n\n  const grid = flow === 'sav' ? GRID_SAV : GRID_CDE_TEL;\n  const dmt = (Math.floor(duree / 60)).toString().padStart(2,'0') + ':' + (duree % 60).toString().padStart(2,'0');\n\n  const context = `Tu es auditeur qualite IA pour Atlas For Men (vetements outdoor, clientele senior 60+).\\nCde Tel = nouvelles commandes catalogue (code avantage, refs+tailles, rebond 2 articles, CB->desactiver enreg).\\nSAV = ou est ma cde, remboursement, plainte, retour, modification (reformulation obligatoire, delai traitement, codification).\\nNormes accueil \"Atlas for Men, [prenom], bonjour\" / conge \"Je vous remercie M/Mme [nom] ... bonne journee de la part d'Atlas for Men\".\\nATTENTION : ASR transcrit souvent mal \"Atlas for Men\" (la plateforme, Atlas Women, etc) — flag \"Possible erreur ASR\" si suspect.`;\n\n  const flowLabel = flow === 'sav' ? 'SAV' : 'Cde Tel';\n  const llm_prompt = [\n    context, '',\n    `FLUX DETECTE : ${flowLabel}`,\n    `PAYS : ${meta.pays} / LANGUE : ${meta.langue_appel} / DUREE : ${dmt} / FICHIER : ${meta.file_name}`,\n    '', grid, '',\n    'REGLES STRICTES :',\n    '- Aucune supposition : si transcript ne montre pas un critere, il N EST PAS maitrise.',\n    '- SI = preuve INCONTESTABLE obligatoire ; dans le doute -> \"Non maitrise\".',\n    '- NA explicite si critere pas applicable.',\n    '- Transcript-only : climat/empathie sur indices textuels.',\n    '- Justifications en francais (meme pour appels EN/DE/PL/CZ).',\n    '',\n    'FORMAT SORTIE — JSON STRICT, RIEN D AUTRE :',\n    '{',\n    '  \"flow\": \"cde_tel|sav\",',\n    '  \"metadata\": { \"agent\":\"\", \"n_client\":\"\", \"n_cde\":\"\", \"type\":\"\", \"demande_client\":\"resume 1 phrase fr\" },',\n    '  \"criteres\": {',\n    '    \"<key>\": { \"notation\":\"Maitrise|A perfectionner|Non maitrise|SI|NA|Conforme|Non conforme\", \"note\": <number|\"NA\">, \"bareme\": <max>, \"justification\":\"1-2 phrases citant transcript\", \"timestamp_preuve\":\"hh:mm:ss\" }',\n    '  },',\n    '  \"SI_detectees\": [ {\"critere\":\"<key>\",\"evidence_transcript\":\"[ts] texte\",\"gravite\":\"haute|critique\"} ],',\n    '  \"totaux\": { \"note_totale_sur_10\": <num>, \"note_sur_100\": <num>, \"note_zero_par_SI\": <bool> },',\n    '  \"commentaire_global\": \"3-5 phrases fr\",',\n    '  \"commentaire_traduit_fr\": \"\"',\n    '}',\n    '',\n    'TRANSCRIPT :', chatForAi,\n  ].join('\\n');\n\n  output.push({ json: {\n    ...meta,\n    flow,\n    duree_appel_secondes: duree,\n    DMT_DMC: dmt,\n    transcript_text: transcript,\n    transcript_text_for_ai: chatForAi,\n    llm_prompt,\n    _placeholder: false,\n  }});\n}\n\nreturn output;"
+      },
+      "id": "1358538a-44c5-4f52-a7f0-b7bc9680a53d",
+      "name": "Build AFM Prompt (Cde Tel | SAV)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2032, 112],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.llm_prompt }}"
+      },
+      "id": "a1f066ed-c4cb-466d-94d8-ec269e4cc012",
+      "name": "Audit Claude",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [2320, 112],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": "claude-sonnet-4-6",
+        "options": {
+          "maxTokensToSample": 4096,
+          "temperature": 0.1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [2320, 368],
+      "id": "9b8f6043-79e7-4e36-ae92-95e2739c802d",
+      "name": "Anthropic Claude Sonnet 4.6",
+      "credentials": {
+        "anthropicApi": { "id": "WEUBznmlueOuIdVm", "name": "Anthropic account" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse JSON Claude et FLATTEN chaque critere en 3 champs : <key>_notation, <key>_note, <key>_bareme.\n\nconst CDE_TEL_KEYS = ['1_accueil','2_identification','3_climat','4_mise_en_attente','5_conclusion','6_prise_conges','7_personnalisation','8_pre_commande','9_commande','10_outils','11_coord_bancaires','12_rebond_commercial','13_objection','14_ecoute_active','15_accompagnement'];\nconst SAV_KEYS = ['1_accueil','2_identification','3_mise_en_attente','4_conclusion','5_prise_conges','6_personnalisation','7_climat','8_maitrise_directivite','9_decouverte_reformulation','10_pertinence_reponse','11_outils','12_codification','13_delai_traitement','14_experience_client','15_ecoute_empathie','16_enchantement'];\n\nconst pickFirstText = (...values) => { for (const v of values) { if (typeof v === 'string' && v.trim()) return v.trim(); } return ''; };\nconst getRawText = (json) => pickFirstText(json.text, json.output, json.response, json.answer, json.content, json.result, (json.message && json.message.content) || '');\nconst parseJsonBlock = (raw) => {\n  if (!raw) return null;\n  let t = String(raw).trim();\n  if (t.startsWith('```')) t = t.replace(/^```(?:json)?\\s*/i, '').replace(/```$/i, '').trim();\n  const f = t.indexOf('{'), l = t.lastIndexOf('}');\n  if (f !== -1 && l > f) { try { return JSON.parse(t.slice(f, l+1)); } catch (e) {} }\n  return null;\n};\n\nfunction flattenCriteres(criteres, keys) {\n  const out = {};\n  for (const key of keys) {\n    const c = (criteres && criteres[key]) || {};\n    out[key + '_notation'] = c.notation != null ? String(c.notation) : '';\n    out[key + '_note'] = (c.note != null && c.note !== '') ? c.note : '';\n    out[key + '_bareme'] = (c.bareme != null && c.bareme !== '') ? c.bareme : '';\n    out[key + '_justification'] = c.justification != null ? String(c.justification) : '';\n  }\n  return out;\n}\n\nconst responses = $input.all();\nconst bases = $('Build AFM Prompt (Cde Tel | SAV)').all();\nconst now = new Date().toISOString();\nconst output = [];\n\nfor (let idx = 0; idx < responses.length; idx++) {\n  const responseItem = (responses[idx] && responses[idx].json) || {};\n  const base = ((bases[idx] && bases[idx].json) || {});\n  const flowFinal = base.flow || 'cde_tel';\n  const keys = flowFinal === 'sav' ? SAV_KEYS : CDE_TEL_KEYS;\n\n  if (base._placeholder) {\n    const empty = flattenCriteres({}, keys);\n    output.push({ json: {\n      currentDate: now,\n      pays: base.pays || '',\n      langue_appel: base.langue_appel || '',\n      flow: flowFinal,\n      nom_fichier: base.file_name || '',\n      n_appel: base.n_appel || '',\n      agent: '',\n      n_client: '',\n      n_cde: '',\n      n_tel: base.n_tel || '',\n      DMT_DMC: '',\n      type: 'non auditable',\n      demande_client: 'Non auditable : ' + (base._placeholder_reason || ''),\n      duree_appel_secondes: 0,\n      ...empty,\n      note_totale_sur_10: '',\n      note_sur_100: '',\n      note_zero_par_SI: false,\n      SI_count: 0,\n      SI_details: '',\n      commentaire_global: 'Placeholder : ' + (base._placeholder_reason || ''),\n      commentaire_traduit_fr: '',\n      criteres_full_json: '',\n      audit_version: 'n8n_claude_v2',\n    }});\n    continue;\n  }\n\n  const rawText = !responseItem.error ? getRawText(responseItem) : '';\n  const parsed = parseJsonBlock(rawText) || {};\n  const meta = parsed.metadata || {};\n  const criteres = parsed.criteres || {};\n  const SI = parsed.SI_detectees || [];\n  const totaux = parsed.totaux || {};\n\n  const flat = flattenCriteres(criteres, keys);\n  const SI_details = (Array.isArray(SI) ? SI : []).map(s => (s.critere || '?') + ' (' + (s.gravite || '?') + '): ' + (s.evidence_transcript || '').slice(0, 80)).join(' || ');\n\n  output.push({ json: {\n    currentDate: now,\n    pays: base.pays || '',\n    langue_appel: base.langue_appel || '',\n    flow: parsed.flow || flowFinal,\n    nom_fichier: base.file_name || '',\n    n_appel: base.n_appel || '',\n    agent: meta.agent || '',\n    n_client: meta.n_client || '',\n    n_cde: meta.n_cde || '',\n    n_tel: base.n_tel || '',\n    DMT_DMC: base.DMT_DMC || '',\n    type: meta.type || '',\n    demande_client: meta.demande_client || '',\n    duree_appel_secondes: base.duree_appel_secondes || 0,\n    ...flat,\n    note_totale_sur_10: totaux.note_totale_sur_10 != null ? totaux.note_totale_sur_10 : '',\n    note_sur_100: totaux.note_sur_100 != null ? totaux.note_sur_100 : '',\n    note_zero_par_SI: !!totaux.note_zero_par_SI,\n    SI_count: (Array.isArray(SI) ? SI.length : 0),\n    SI_details,\n    commentaire_global: parsed.commentaire_global || '',\n    commentaire_traduit_fr: parsed.commentaire_traduit_fr || '',\n    criteres_full_json: JSON.stringify(criteres),\n    audit_version: 'n8n_claude_v2',\n  }});\n}\nreturn output;"
+      },
+      "id": "7905d398-4b86-4717-8ac4-eedb32db237f",
+      "name": "Format Audit AFM (flatten per critere)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2672, 112],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.flow }}",
+                    "rightValue": "cde_tel",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "cde_tel"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.flow }}",
+                    "rightValue": "sav",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "sav"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e3a2b9c1-5d8f-4e7a-9c4b-1f2a3d4e5b6c",
+      "name": "Route by flow (cde_tel | sav)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [2992, 112]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1xK08z0SYitPHm11a4jmAn0aITQTn6D1EO3vn6T1_8o8",
+          "mode": "id"
+        },
+        "sheetName": { "__rl": true, "value": "={{ $json.pays }}_CdesTel", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "currentDate": "={{ $json.currentDate }}",
+            "pays": "={{ $json.pays }}",
+            "langue_appel": "={{ $json.langue_appel }}",
+            "flow": "={{ $json.flow }}",
+            "nom_fichier": "={{ $json.nom_fichier }}",
+            "n_appel": "={{ $json.n_appel }}",
+            "agent": "={{ $json.agent }}",
+            "n_client": "={{ $json.n_client }}",
+            "n_cde": "={{ $json.n_cde }}",
+            "n_tel": "={{ $json.n_tel }}",
+            "DMT_DMC": "={{ $json.DMT_DMC }}",
+            "type": "={{ $json.type }}",
+            "demande_client": "={{ $json.demande_client }}",
+            "duree_appel_secondes": "={{ $json.duree_appel_secondes }}",
+            "1_accueil_note": "={{ $json['1_accueil_note'] }}",
+            "1_accueil_bareme": "={{ $json['1_accueil_bareme'] }}",
+            "1_accueil_notation": "={{ $json['1_accueil_notation'] }}",
+            "2_identification_note": "={{ $json['2_identification_note'] }}",
+            "2_identification_bareme": "={{ $json['2_identification_bareme'] }}",
+            "2_identification_notation": "={{ $json['2_identification_notation'] }}",
+            "3_climat_note": "={{ $json['3_climat_note'] }}",
+            "3_climat_bareme": "={{ $json['3_climat_bareme'] }}",
+            "3_climat_notation": "={{ $json['3_climat_notation'] }}",
+            "4_mise_en_attente_note": "={{ $json['4_mise_en_attente_note'] }}",
+            "4_mise_en_attente_bareme": "={{ $json['4_mise_en_attente_bareme'] }}",
+            "4_mise_en_attente_notation": "={{ $json['4_mise_en_attente_notation'] }}",
+            "5_conclusion_note": "={{ $json['5_conclusion_note'] }}",
+            "5_conclusion_bareme": "={{ $json['5_conclusion_bareme'] }}",
+            "5_conclusion_notation": "={{ $json['5_conclusion_notation'] }}",
+            "6_prise_conges_note": "={{ $json['6_prise_conges_note'] }}",
+            "6_prise_conges_bareme": "={{ $json['6_prise_conges_bareme'] }}",
+            "6_prise_conges_notation": "={{ $json['6_prise_conges_notation'] }}",
+            "7_personnalisation_note": "={{ $json['7_personnalisation_note'] }}",
+            "7_personnalisation_bareme": "={{ $json['7_personnalisation_bareme'] }}",
+            "7_personnalisation_notation": "={{ $json['7_personnalisation_notation'] }}",
+            "8_pre_commande_note": "={{ $json['8_pre_commande_note'] }}",
+            "8_pre_commande_bareme": "={{ $json['8_pre_commande_bareme'] }}",
+            "8_pre_commande_notation": "={{ $json['8_pre_commande_notation'] }}",
+            "9_commande_note": "={{ $json['9_commande_note'] }}",
+            "9_commande_bareme": "={{ $json['9_commande_bareme'] }}",
+            "9_commande_notation": "={{ $json['9_commande_notation'] }}",
+            "10_outils_note": "={{ $json['10_outils_note'] }}",
+            "10_outils_bareme": "={{ $json['10_outils_bareme'] }}",
+            "10_outils_notation": "={{ $json['10_outils_notation'] }}",
+            "11_coord_bancaires_note": "={{ $json['11_coord_bancaires_note'] }}",
+            "11_coord_bancaires_bareme": "={{ $json['11_coord_bancaires_bareme'] }}",
+            "11_coord_bancaires_notation": "={{ $json['11_coord_bancaires_notation'] }}",
+            "12_rebond_commercial_note": "={{ $json['12_rebond_commercial_note'] }}",
+            "12_rebond_commercial_bareme": "={{ $json['12_rebond_commercial_bareme'] }}",
+            "12_rebond_commercial_notation": "={{ $json['12_rebond_commercial_notation'] }}",
+            "13_objection_note": "={{ $json['13_objection_note'] }}",
+            "13_objection_bareme": "={{ $json['13_objection_bareme'] }}",
+            "13_objection_notation": "={{ $json['13_objection_notation'] }}",
+            "14_ecoute_active_note": "={{ $json['14_ecoute_active_note'] }}",
+            "14_ecoute_active_bareme": "={{ $json['14_ecoute_active_bareme'] }}",
+            "14_ecoute_active_notation": "={{ $json['14_ecoute_active_notation'] }}",
+            "15_accompagnement_note": "={{ $json['15_accompagnement_note'] }}",
+            "15_accompagnement_bareme": "={{ $json['15_accompagnement_bareme'] }}",
+            "15_accompagnement_notation": "={{ $json['15_accompagnement_notation'] }}",
+            "note_totale_sur_10": "={{ $json.note_totale_sur_10 }}",
+            "note_sur_100": "={{ $json.note_sur_100 }}",
+            "note_zero_par_SI": "={{ $json.note_zero_par_SI }}",
+            "SI_count": "={{ $json.SI_count }}",
+            "SI_details": "={{ $json.SI_details }}",
+            "commentaire_global": "={{ $json.commentaire_global }}",
+            "commentaire_traduit_fr": "={{ $json.commentaire_traduit_fr }}",
+            "criteres_full_json": "={{ $json.criteres_full_json }}",
+            "audit_version": "={{ $json.audit_version }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "04765ca6-912f-4a3e-9687-1cdf5fae1c31",
+      "name": "Append to {pays}_CdesTel",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [3296, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "UQsJBYlYRMVkoRa6", "name": "Google Sheets account 9" }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1xK08z0SYitPHm11a4jmAn0aITQTn6D1EO3vn6T1_8o8",
+          "mode": "id"
+        },
+        "sheetName": { "__rl": true, "value": "={{ $json.pays }}_Sav", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "currentDate": "={{ $json.currentDate }}",
+            "pays": "={{ $json.pays }}",
+            "langue_appel": "={{ $json.langue_appel }}",
+            "flow": "={{ $json.flow }}",
+            "nom_fichier": "={{ $json.nom_fichier }}",
+            "n_appel": "={{ $json.n_appel }}",
+            "agent": "={{ $json.agent }}",
+            "n_client": "={{ $json.n_client }}",
+            "n_cde": "={{ $json.n_cde }}",
+            "n_tel": "={{ $json.n_tel }}",
+            "DMT_DMC": "={{ $json.DMT_DMC }}",
+            "type": "={{ $json.type }}",
+            "demande_client": "={{ $json.demande_client }}",
+            "duree_appel_secondes": "={{ $json.duree_appel_secondes }}",
+            "1_accueil_note": "={{ $json['1_accueil_note'] }}",
+            "1_accueil_bareme": "={{ $json['1_accueil_bareme'] }}",
+            "1_accueil_notation": "={{ $json['1_accueil_notation'] }}",
+            "2_identification_note": "={{ $json['2_identification_note'] }}",
+            "2_identification_bareme": "={{ $json['2_identification_bareme'] }}",
+            "2_identification_notation": "={{ $json['2_identification_notation'] }}",
+            "3_mise_en_attente_note": "={{ $json['3_mise_en_attente_note'] }}",
+            "3_mise_en_attente_bareme": "={{ $json['3_mise_en_attente_bareme'] }}",
+            "3_mise_en_attente_notation": "={{ $json['3_mise_en_attente_notation'] }}",
+            "4_conclusion_note": "={{ $json['4_conclusion_note'] }}",
+            "4_conclusion_bareme": "={{ $json['4_conclusion_bareme'] }}",
+            "4_conclusion_notation": "={{ $json['4_conclusion_notation'] }}",
+            "5_prise_conges_note": "={{ $json['5_prise_conges_note'] }}",
+            "5_prise_conges_bareme": "={{ $json['5_prise_conges_bareme'] }}",
+            "5_prise_conges_notation": "={{ $json['5_prise_conges_notation'] }}",
+            "6_personnalisation_note": "={{ $json['6_personnalisation_note'] }}",
+            "6_personnalisation_bareme": "={{ $json['6_personnalisation_bareme'] }}",
+            "6_personnalisation_notation": "={{ $json['6_personnalisation_notation'] }}",
+            "7_climat_note": "={{ $json['7_climat_note'] }}",
+            "7_climat_bareme": "={{ $json['7_climat_bareme'] }}",
+            "7_climat_notation": "={{ $json['7_climat_notation'] }}",
+            "8_maitrise_directivite_note": "={{ $json['8_maitrise_directivite_note'] }}",
+            "8_maitrise_directivite_bareme": "={{ $json['8_maitrise_directivite_bareme'] }}",
+            "8_maitrise_directivite_notation": "={{ $json['8_maitrise_directivite_notation'] }}",
+            "9_decouverte_reformulation_note": "={{ $json['9_decouverte_reformulation_note'] }}",
+            "9_decouverte_reformulation_bareme": "={{ $json['9_decouverte_reformulation_bareme'] }}",
+            "9_decouverte_reformulation_notation": "={{ $json['9_decouverte_reformulation_notation'] }}",
+            "10_pertinence_reponse_note": "={{ $json['10_pertinence_reponse_note'] }}",
+            "10_pertinence_reponse_bareme": "={{ $json['10_pertinence_reponse_bareme'] }}",
+            "10_pertinence_reponse_notation": "={{ $json['10_pertinence_reponse_notation'] }}",
+            "11_outils_note": "={{ $json['11_outils_note'] }}",
+            "11_outils_bareme": "={{ $json['11_outils_bareme'] }}",
+            "11_outils_notation": "={{ $json['11_outils_notation'] }}",
+            "12_codification_note": "={{ $json['12_codification_note'] }}",
+            "12_codification_bareme": "={{ $json['12_codification_bareme'] }}",
+            "12_codification_notation": "={{ $json['12_codification_notation'] }}",
+            "13_delai_traitement_note": "={{ $json['13_delai_traitement_note'] }}",
+            "13_delai_traitement_bareme": "={{ $json['13_delai_traitement_bareme'] }}",
+            "13_delai_traitement_notation": "={{ $json['13_delai_traitement_notation'] }}",
+            "14_experience_client_note": "={{ $json['14_experience_client_note'] }}",
+            "14_experience_client_bareme": "={{ $json['14_experience_client_bareme'] }}",
+            "14_experience_client_notation": "={{ $json['14_experience_client_notation'] }}",
+            "15_ecoute_empathie_note": "={{ $json['15_ecoute_empathie_note'] }}",
+            "15_ecoute_empathie_bareme": "={{ $json['15_ecoute_empathie_bareme'] }}",
+            "15_ecoute_empathie_notation": "={{ $json['15_ecoute_empathie_notation'] }}",
+            "16_enchantement_note": "={{ $json['16_enchantement_note'] }}",
+            "16_enchantement_bareme": "={{ $json['16_enchantement_bareme'] }}",
+            "16_enchantement_notation": "={{ $json['16_enchantement_notation'] }}",
+            "note_totale_sur_10": "={{ $json.note_totale_sur_10 }}",
+            "note_sur_100": "={{ $json.note_sur_100 }}",
+            "note_zero_par_SI": "={{ $json.note_zero_par_SI }}",
+            "SI_count": "={{ $json.SI_count }}",
+            "SI_details": "={{ $json.SI_details }}",
+            "commentaire_global": "={{ $json.commentaire_global }}",
+            "commentaire_traduit_fr": "={{ $json.commentaire_traduit_fr }}",
+            "criteres_full_json": "={{ $json.criteres_full_json }}",
+            "audit_version": "={{ $json.audit_version }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "b6c7d8e9-f0a1-4b2c-9d3e-4f5a6b7c8d9e",
+      "name": "Append to {pays}_Sav",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [3296, 240],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "UQsJBYlYRMVkoRa6", "name": "Google Sheets account 9" }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Start Manual": {
+      "main": [[{ "node": "List Files in Drive Folder", "type": "main", "index": 0 }]]
+    },
+    "Webhook trigger": {
+      "main": [[{ "node": "List Files in Drive Folder", "type": "main", "index": 0 }]]
+    },
+    "List Files in Drive Folder": {
+      "main": [[{ "node": "Build File Cards + detect pays", "type": "main", "index": 0 }]]
+    },
+    "Build File Cards + detect pays": {
+      "main": [[{ "node": "Loop Files (batch 5)", "type": "main", "index": 0 }]]
+    },
+    "Loop Files (batch 5)": {
+      "main": [
+        [],
+        [{ "node": "Get Sheet Metadata", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Sheet Metadata": {
+      "main": [[{ "node": "Build Values URL", "type": "main", "index": 0 }]]
+    },
+    "Build Values URL": {
+      "main": [[{ "node": "Get Sheet Values", "type": "main", "index": 0 }]]
+    },
+    "Get Sheet Values": {
+      "main": [[{ "node": "Build AFM Prompt (Cde Tel | SAV)", "type": "main", "index": 0 }]]
+    },
+    "Build AFM Prompt (Cde Tel | SAV)": {
+      "main": [[{ "node": "Audit Claude", "type": "main", "index": 0 }]]
+    },
+    "Audit Claude": {
+      "main": [[{ "node": "Format Audit AFM (flatten per critere)", "type": "main", "index": 0 }]]
+    },
+    "Anthropic Claude Sonnet 4.6": {
+      "ai_languageModel": [[{ "node": "Audit Claude", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Format Audit AFM (flatten per critere)": {
+      "main": [[{ "node": "Route by flow (cde_tel | sav)", "type": "main", "index": 0 }]]
+    },
+    "Route by flow (cde_tel | sav)": {
+      "main": [
+        [{ "node": "Append to {pays}_CdesTel", "type": "main", "index": 0 }],
+        [{ "node": "Append to {pays}_Sav", "type": "main", "index": 0 }]
+      ]
+    },
+    "Append to {pays}_CdesTel": {
+      "main": [[{ "node": "Loop Files (batch 5)", "type": "main", "index": 0 }]]
+    },
+    "Append to {pays}_Sav": {
+      "main": [[{ "node": "Loop Files (batch 5)", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "2da088c4-5b39-49c2-b0c0-460daffee06e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ac49a3c54ead5da34233a7865ea0ea1a8f7cf0c71f95e207ee52e0c5789d2f62"
+  },
+  "id": "7EHPCsJi6LTXGuLz",
+  "tags": []
+}
