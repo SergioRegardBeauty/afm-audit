@@ -43,6 +43,10 @@ pipeline/subagent_inputs/
 pipeline/subagent_inputs_chunks/
 pipeline/manifest.json
 
+# --- OUTPUTS DU PIPELINE PYTHON (contient PII) ---
+kickoff/repo_skeleton/local_audits_out/
+kickoff/repo_skeleton/service_account*.json
+
 # --- PYTHON ---
 __pycache__/
 *.py[cod]
