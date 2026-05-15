@@ -1,0 +1,39 @@
+# Atlas For Men — comptes utilisateurs interface web
+#
+# ⚠️ NE JAMAIS COMMIT users.yaml — il contient les hash bcrypt des mots de passe.
+# Garde-le hors-Git (cf .gitignore qui exclut users.yaml).
+#
+# Pour générer un hash bcrypt :
+#   python -c "import bcrypt; print(bcrypt.hashpw(b'mot_de_passe', bcrypt.gensalt()).decode())"
+#
+# Copier ce fichier en `users.yaml` et remplacer les valeurs.
+
+credentials:
+  usernames:
+    djibril:
+      name: "Djibril Atlas"
+      email: dev@regardbeauty.com
+      password: "$2b$12$REPLACE_WITH_BCRYPT_HASH_HERE_xxxxxxxxxxxxxxxxxxxxxxxxx"
+      roles: [admin]
+    sergio:
+      name: "Sergio Hazary"
+      email: sergiohazary@gmail.com
+      password: "$2b$12$REPLACE_WITH_BCRYPT_HASH_HERE_xxxxxxxxxxxxxxxxxxxxxxxxx"
+      roles: [auditor]
+    # Ajouter d'autres collègues ici :
+    # collegue1:
+    #   name: "Prénom Nom"
+    #   email: collegue@atlasformen.com
+    #   password: "$2b$12$..."
+    #   roles: [auditor]
+
+cookie:
+  name: afm_audit_session
+  # Générer une clé aléatoire (32 chars) : python -c "import secrets; print(secrets.token_hex(16))"
+  key: "GENERE_AVEC_secrets.token_hex_32"
+  expiry_days: 7
+
+# Rôles disponibles :
+#   admin    : tout (lancer audits, gérer users, voir logs)
+#   auditor  : peut lancer des audits + voir tous les résultats
+#   reader   : lecture seule sur dashboard + audits

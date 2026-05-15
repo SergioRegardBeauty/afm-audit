@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Pre-commit hook anti-PII pour Atlas For Men.
+#
+# Bloque tout commit qui contient :
+#   - un fichier MP3/WAV/Opus (recordings client)
+#   - un fichier *.mp3.csv ou un CSV qui ressemble à un transcript HappyScribe
+#   - un fichier service_account*.json
+#   - un fichier .env (sans le .example)
+#   - un dump *.sql.dump / pg_dump_*.sql
+#   - le fichier users.yaml (hash bcrypt)
+#   - un Excel BQ_x rempli (output/*/BQ_*.xlsx)
+#
+# Installation (une fois après le clone):
+#     git config core.hooksPath .git-hooks
+#     chmod +x .git-hooks/pre-commit
+#
+# Pour bypass (à éviter sauf cas critique) :
+#     git commit --no-verify
+
+set -e
+
+FORBIDDEN=()
+
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+
+  case "$f" in
+    *.mp3|*.wav|*.opus|*.m4a)
+      FORBIDDEN+=("$f (recording PII)") ;;
+    *.mp3.csv)
+      FORBIDDEN+=("$f (transcript PII)") ;;
+    *service_account*.json|*credentials*.json|*.pem|*.key)
+      FORBIDDEN+=("$f (credentials)") ;;
+    .env|*/.env|.env.local|.env.production)
+      FORBIDDEN+=("$f (secret env)") ;;
+    *.sql.dump|*_dump.sql|*pg_dump*.sql)
+      FORBIDDEN+=("$f (SQL dump - peut contenir PII)") ;;
+    *users.yaml)
+      # Autoriser users.yaml.example mais pas users.yaml
+      case "$f" in
+        *users.yaml.example) ;;
+        *) FORBIDDEN+=("$f (hash bcrypt des users)") ;;
+      esac ;;
+    output/*/BQ_*.xlsx|output/*/audits_json/*|audits_ia/*)
+      FORBIDDEN+=("$f (audit rempli PII)") ;;
+    corpus/*|gold_standard/*|dialoga_snapshot/*)
+      FORBIDDEN+=("$f (data PII)") ;;
+  esac
+
+  # Détection bonus : un CSV "transcript" même s'il n'a pas le suffixe .mp3.csv
+  if [[ "$f" == *.csv ]] && head -1 "$f" 2>/dev/null | grep -qiE "speaker.*start.*time.*end.*time"; then
+    FORBIDDEN+=("$f (CSV ressemble à un transcript HappyScribe)")
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACM)
+
+if [ ${#FORBIDDEN[@]} -gt 0 ]; then
+  echo ""
+  echo "========================================================="
+  echo "  ⛔ COMMIT BLOQUÉ : fichiers PII / secrets détectés"
+  echo "========================================================="
+  for f in "${FORBIDDEN[@]}"; do
+    echo "  - $f"
+  done
+  echo ""
+  echo "Ces fichiers ne doivent JAMAIS aller dans Git (RGPD + secrets)."
+  echo "Vérifie .gitignore et retire-les du staging :"
+  echo "    git restore --staged <fichier>"
+  echo ""
+  echo "Si tu es certain (cas exceptionnel) : git commit --no-verify"
+  echo "========================================================="
+  exit 1
+fi
+
+exit 0

@@ -25,10 +25,14 @@ def load_prompt_template(flow: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def audit_transcript(transcript_text: str, *, flow: str, file_name: str, pays: str, langue: str) -> dict:
+def audit_transcript(transcript_text: str, *, flow: str, file_name: str, pays: str,
+                     langue: str, model: str | None = None) -> dict:
     """
     Audite un transcript via Claude et renvoie le JSON parse.
     Renvoie egalement le hash du prompt (pour traceability) et la reponse brute.
+
+    `model` override : si None, utilise settings.anthropic_model. L'interface Streamlit
+    permet de choisir Haiku/Sonnet à la volée par appel.
     """
     template = load_prompt_template(flow)
 
@@ -41,9 +45,10 @@ def audit_transcript(transcript_text: str, *, flow: str, file_name: str, pays: s
     )
 
     prompt_hash = hashlib.sha256(full_prompt.encode("utf-8")).hexdigest()
+    model_used = model or settings.anthropic_model
 
     response = _client.messages.create(
-        model=settings.anthropic_model,
+        model=model_used,
         max_tokens=settings.anthropic_max_tokens,
         temperature=0.1,
         messages=[{"role": "user", "content": full_prompt}],
@@ -72,7 +77,7 @@ def audit_transcript(transcript_text: str, *, flow: str, file_name: str, pays: s
         "parsed": parsed,
         "raw_text": raw_text,
         "prompt_hash": prompt_hash,
-        "model": settings.anthropic_model,
+        "model": model_used,
         "input_tokens": response.usage.input_tokens,
         "output_tokens": response.usage.output_tokens,
     }

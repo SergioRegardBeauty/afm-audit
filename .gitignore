@@ -15,6 +15,17 @@ credentials*.json
 secret*.json
 api_keys.txt
 
+# --- USERS / AUTH (hash bcrypt = secret) ---
+kickoff/repo_skeleton/app/users.yaml
+**/users.yaml
+!**/users.yaml.example
+
+# --- DUMPS SQL (peuvent contenir PII) ---
+*.sql.dump
+*_dump.sql
+afm_audit_dump.sql
+pg_dump_*.sql
+
 # --- DONNEES BRUTES (transcripts CSV Dialoga) ---
 Atlas FR - * csv*/
 Atlas EN - * csv*/
@@ -34,6 +45,7 @@ audits_ia/
 output/*/BQ_*.xlsx
 output/*/audits_json/
 output/*/audits_v1/
+output/_selection/
 corpus/
 gold_standard/
 dialoga_snapshot/

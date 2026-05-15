@@ -124,6 +124,61 @@ def audit_one_file(drive_file: DriveFile, audit_version: str = "v2_python") -> d
     }
 
 
+def audit_one_file_from_db(transcript_id, audit_version: str = "ui_v1",
+                            model: str | None = None) -> dict:
+    """Audit Claude pour un transcript déjà en DB (utilisé par l'interface Streamlit).
+
+    Lit `transcripts.raw_text` + métadonnées, appelle Claude, insère dans `audits`.
+    Retourne le dict résultat (note, criteres, …) tel que parsé.
+    """
+    from uuid import UUID
+    if not isinstance(transcript_id, UUID):
+        transcript_id = UUID(str(transcript_id))
+
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT file_name, pays, langue, flow, raw_text, size_bytes "
+            "FROM transcripts WHERE id = %s",
+            (transcript_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ValueError(f"Transcript {transcript_id} introuvable en DB.")
+
+        file_name = row["file_name"]
+        pays = row["pays"]
+        langue = row["langue"]
+        flow = row["flow"] or detect_flow(row["raw_text"] or "")
+        text = row["raw_text"] or ""
+
+        if row["size_bytes"] < 500 or not text:
+            return {"transcript_id": str(transcript_id), "skipped": "too_short",
+                    "note_totale_sur_10": None}
+
+        result = audit_transcript(
+            text, flow=flow, file_name=file_name, pays=pays, langue=langue, model=model,
+        )
+
+        audit_id = insert_audit(
+            conn,
+            transcript_id=transcript_id, audit_version=audit_version,
+            llm_model=result["model"], prompt_hash=result["prompt_hash"], flow=flow,
+            parsed=result["parsed"], raw_llm_response=result["raw_text"],
+        )
+
+    parsed = result["parsed"]
+    totaux = parsed.get("totaux") or {}
+    return {
+        "transcript_id": str(transcript_id),
+        "audit_id": str(audit_id),
+        "note_totale_sur_10": totaux.get("note_totale_sur_10"),
+        "note_zero_par_SI": bool(totaux.get("note_zero_par_SI")),
+        "commentaire_global": parsed.get("commentaire_global"),
+        "criteres": parsed.get("criteres"),
+        "SI_detectees": parsed.get("SI_detectees"),
+    }
+
+
 def audit_drive_folder(folder_id: str, audit_version: str = "v2_python") -> list[dict]:
     files = list_files_in_folder(folder_id)
     results = []
