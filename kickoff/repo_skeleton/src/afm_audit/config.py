@@ -14,27 +14,27 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Anthropic
-    anthropic_api_key: str = Field(..., alias="ANTHROPIC_API_KEY")
+    # Anthropic (REQUIRED — audit IA ne tourne pas sans)
+    anthropic_api_key: str = Field("", alias="ANTHROPIC_API_KEY")
     anthropic_model: str = Field("claude-sonnet-4-6", alias="ANTHROPIC_MODEL")
     anthropic_max_tokens: int = Field(4096, alias="ANTHROPIC_MAX_TOKENS")
 
-    # Google
+    # Google (optionnel — non utilisé par l'UI Streamlit, requis seulement pour l'ingest Drive)
     google_application_credentials: Path = Field(
         Path("./service_account.json"), alias="GOOGLE_APPLICATION_CREDENTIALS"
     )
     drive_folder_ids_transcripts: str = Field("", alias="DRIVE_FOLDER_IDS_TRANSCRIPTS")
     drive_folder_ids_recordings: str = Field("", alias="DRIVE_FOLDER_IDS_RECORDINGS")
 
-    # Postgres
-    database_url: str = Field(..., alias="DATABASE_URL")
+    # Postgres (REQUIRED pour l'UI — sans DB, rien ne marche)
+    database_url: str = Field("", alias="DATABASE_URL")
 
-    # S3
+    # S3 (optionnel — non utilisé par l'UI, requis seulement pour upload_csv_to_bucket.py)
     s3_endpoint_url: str = Field("http://localhost:9000", alias="S3_ENDPOINT_URL")
     s3_bucket: str = Field("afm-audit-recordings", alias="S3_BUCKET")
     s3_region: str = Field("fr-par", alias="S3_REGION")
-    s3_access_key: str = Field(..., alias="S3_ACCESS_KEY")
-    s3_secret_key: str = Field(..., alias="S3_SECRET_KEY")
+    s3_access_key: str = Field("", alias="S3_ACCESS_KEY")
+    s3_secret_key: str = Field("", alias="S3_SECRET_KEY")
     s3_use_ssl: bool = Field(False, alias="S3_USE_SSL")
 
     # ASR
