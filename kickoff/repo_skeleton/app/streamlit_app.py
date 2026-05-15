@@ -50,15 +50,33 @@ st.set_page_config(
 # il crée des widgets cookie-manager.
 # ---------------------------------------------------------------------------
 def load_users_config() -> dict:
+    """Trois sources possibles, par ordre de priorité :
+       1. st.secrets['users_yaml']  → string YAML, utilisé sur Streamlit Cloud
+       2. app/users.yaml local      → utilisé en dev local
+       3. erreur sinon
+    """
+    # 1. Streamlit Cloud secrets
+    try:
+        yaml_content = st.secrets.get("users_yaml")
+    except (FileNotFoundError, AttributeError):
+        yaml_content = None
+    if yaml_content:
+        return yaml.load(yaml_content, Loader=SafeLoader)
+
+    # 2. Fichier local
     users_yaml = Path(__file__).parent / "users.yaml"
-    if not users_yaml.exists():
-        st.error(
-            "`app/users.yaml` introuvable. Copie `app/users.yaml.example` en "
-            "`app/users.yaml` et remplis avec les comptes équipe (hash bcrypt)."
-        )
-        st.stop()
-    with users_yaml.open("r", encoding="utf-8") as f:
-        return yaml.load(f, Loader=SafeLoader)
+    if users_yaml.exists():
+        with users_yaml.open("r", encoding="utf-8") as f:
+            return yaml.load(f, Loader=SafeLoader)
+
+    # 3. Pas de config
+    st.error(
+        "Configuration utilisateurs introuvable :\n"
+        "- En **local** : copie `app/users.yaml.example` en `app/users.yaml` et remplis-le.\n"
+        "- Sur **Streamlit Cloud** : ajoute dans `Settings > Secrets` une clé `users_yaml` "
+        "contenant le YAML complet (voir doc DEPLOY_CLOUD.md)."
+    )
+    st.stop()
 
 
 _cfg = load_users_config()
