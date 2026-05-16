@@ -138,6 +138,18 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Helpers DB (cache 5 min sur les KPIs)
 # ---------------------------------------------------------------------------
+def _db_not_configured_warning() -> None:
+    """Affiche un message clair quand DATABASE_URL n'est pas (encore) configuré
+    dans les Secrets Streamlit Cloud. La page Auto-audit, elle, marche sans DB."""
+    st.warning(
+        "🛑 **Base de données non configurée**\n\n"
+        "Cette page nécessite Postgres. Configure `DATABASE_URL` dans les Secrets de l'app "
+        "(Manage app → Settings → Secrets) avec ton URL Supabase (session pooler IPv4).\n\n"
+        "👉 En attendant, tu peux utiliser **📤 Auto-audit (upload CSV)** "
+        "qui marche sans DB."
+    )
+
+
 @st.cache_data(ttl=300)
 def fetch_counts_by_pays_flow() -> pd.DataFrame:
     with get_connection() as conn, conn.cursor() as cur:
@@ -210,7 +222,12 @@ def page_dashboard() -> None:
     st.title("📊 Dashboard")
     st.caption("Vue d'ensemble des transcripts et audits en base.")
 
-    df_counts = fetch_counts_by_pays_flow()
+    try:
+        df_counts = fetch_counts_by_pays_flow()
+    except Exception as e:
+        _db_not_configured_warning()
+        st.caption(f"_Détail technique : {type(e).__name__}_")
+        return
     if df_counts.empty:
         st.warning("Aucun transcript en DB. Lance `python scripts/ingest_local_transcripts.py` d'abord.")
         return
@@ -229,7 +246,10 @@ def page_dashboard() -> None:
     st.dataframe(pivot, use_container_width=True)
 
     st.subheader("Audits IA produits")
-    df_audits = fetch_audits_summary()
+    try:
+        df_audits = fetch_audits_summary()
+    except Exception:
+        df_audits = pd.DataFrame()
     if df_audits.empty:
         st.info("Aucun audit IA pour l'instant. Lance le module 'Lancer un audit' pour démarrer.")
     else:
@@ -245,7 +265,11 @@ def page_transcripts() -> None:
     size_min = c3.slider("Taille minimum (bytes)", 0, 5000, 500,
                          help="< 500B = silences / IVR-only, exclus par défaut.")
 
-    df = fetch_transcripts_page(pays or None, flow or None, size_min)
+    try:
+        df = fetch_transcripts_page(pays or None, flow or None, size_min)
+    except Exception:
+        _db_not_configured_warning()
+        return
     st.caption(f"{len(df)} transcripts affichés (max 50 par page).")
 
     if df.empty:
@@ -257,9 +281,13 @@ def page_transcripts() -> None:
 
 def page_lancer_audit() -> None:
     st.title("🤖 Lancer un audit IA")
-    st.caption("Sélectionne un transcript, choisis le modèle, et lance l'audit Claude.")
+    st.caption("Sélectionne un transcript déjà en DB, choisis le modèle, et lance l'audit Claude.")
 
-    df = fetch_transcripts_page(None, None, 3000, limit=200)
+    try:
+        df = fetch_transcripts_page(None, None, 3000, limit=200)
+    except Exception:
+        _db_not_configured_warning()
+        return
     if df.empty:
         st.warning("Aucun transcript de taille suffisante (≥ 3 KB) à auditer.")
         return
@@ -434,18 +462,22 @@ def page_auto_audit() -> None:
 
 def page_audits() -> None:
     st.title("📋 Audits IA produits")
-    with get_connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT t.file_name, t.pays, t.flow,
-                   a.audit_version, a.llm_model,
-                   a.note_totale_sur_10, a.note_zero_par_SI, a.si_count,
-                   a.created_at
-            FROM audits a JOIN transcripts t ON t.id = a.transcript_id
-            ORDER BY a.created_at DESC LIMIT 100
-            """
-        )
-        rows = cur.fetchall()
+    try:
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT t.file_name, t.pays, t.flow,
+                       a.audit_version, a.llm_model,
+                       a.note_totale_sur_10, a.note_zero_par_SI, a.si_count,
+                       a.created_at
+                FROM audits a JOIN transcripts t ON t.id = a.transcript_id
+                ORDER BY a.created_at DESC LIMIT 100
+                """
+            )
+            rows = cur.fetchall()
+    except Exception:
+        _db_not_configured_warning()
+        return
     if not rows:
         st.info("Aucun audit en DB. Va dans 'Lancer un audit' pour en produire.")
         return
