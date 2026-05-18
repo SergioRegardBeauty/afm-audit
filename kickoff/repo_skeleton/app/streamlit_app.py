@@ -416,20 +416,12 @@ def page_auto_audit() -> None:
     progress.progress(1.0, text=f"✅ Terminé : {sum(len(v) for v in results_by_pays_flow.values())} audits OK, "
                                 f"{len(skipped)} skipped.")
 
-    # --- Résumé par pays/flow ---
-    if results_by_pays_flow:
-        summary = [{"Pays": p, "Flow": fl, "Audits": len(v)}
-                   for (p, fl), v in results_by_pays_flow.items()]
-        st.subheader("Résultats par pays × flow")
-        st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
-
-    if skipped:
-        st.subheader(f"⚠️ {len(skipped)} fichiers ignorés")
-        st.dataframe(pd.DataFrame(skipped, columns=["Fichier", "Raison"]),
-                     use_container_width=True, hide_index=True)
-
     if not results_by_pays_flow:
         st.warning("Aucun audit produit. Vérifie le contenu des fichiers.")
+        if skipped:
+            with st.expander(f"⚠️ {len(skipped)} fichiers ignorés"):
+                st.dataframe(pd.DataFrame(skipped, columns=["Fichier", "Raison"]),
+                             use_container_width=True, hide_index=True)
         return
 
     # --- Génération des Excels BQ et bundle ZIP ---
@@ -451,13 +443,32 @@ def page_auto_audit() -> None:
                 finally:
                     tmp_path.unlink(missing_ok=True)
 
+    # --- Bouton de téléchargement principal (mis en évidence) ---
+    st.success(
+        f"✅ **{sum(len(v) for v in results_by_pays_flow.values())} audits produits** dans "
+        f"{len(results_by_pays_flow)} fichier(s) Excel BQ. Télécharge le pack ci-dessous "
+        f"(format identique au template `BQ_1_CdesTel_10` / `BQ_4_Sav_10`)."
+    )
     st.download_button(
-        "📦 Télécharger le pack Excel (ZIP)",
+        "📦 Télécharger le pack Excel BQ (ZIP)",
         zip_buffer.getvalue(),
         file_name="audits_atlas_for_men.zip",
         mime="application/zip",
         type="primary",
+        use_container_width=True,
     )
+
+    # --- Détails additionnels en expanders rétractables (pas de confusion download) ---
+    with st.expander("📊 Détail par pays × flow", expanded=False):
+        summary = [{"Pays": p, "Flow": fl, "Audits": len(v)}
+                   for (p, fl), v in results_by_pays_flow.items()]
+        st.caption("Ce tableau est juste un récap. Le **pack Excel BQ** est dans le ZIP ci-dessus.")
+        st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
+
+    if skipped:
+        with st.expander(f"⚠️ {len(skipped)} fichiers ignorés", expanded=False):
+            st.dataframe(pd.DataFrame(skipped, columns=["Fichier", "Raison"]),
+                         use_container_width=True, hide_index=True)
 
 
 def page_audits() -> None:
