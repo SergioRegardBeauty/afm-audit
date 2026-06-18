@@ -1,8 +1,30 @@
 # Atlas For Men — Audit IA des appels service client
 
+![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.39+-FF4B4B?logo=streamlit&logoColor=white)
+![Claude](https://img.shields.io/badge/Claude-Sonnet%204.6-D97757?logo=anthropic&logoColor=white)
+![Postgres](https://img.shields.io/badge/Postgres-16-336791?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![Status](https://img.shields.io/badge/Status-Phase%201%20en%20cours-yellow)
+![License](https://img.shields.io/badge/License-Propriétaire-red)
+
 Pipeline d'audit qualité IA des appels téléphoniques **Atlas For Men** (Commande Tél + SAV) sur les 5 marchés européens. Audit selon les grilles officielles AFM `BQ_1_CdesTel` (15 critères) et `BQ_4_Sav` (16 critères), via Claude Sonnet 4.6.
 
 > ⚠️ **Repo privé Atlas For Men**. Contient prompts métier, méthodologie d'audit et configuration d'infrastructure. **Données clients (transcripts, recordings, audits remplis) jamais commit dans Git** — exigence RGPD documentée dans `.gitignore`.
+
+---
+
+## 🌐 Démo live
+
+L'interface multi-user est déployée sur Streamlit Cloud :
+
+**🔗 https://afm-audit.streamlit.app**
+
+Identifiants de démo (à changer après 1ère connexion) :
+- Username : `djibril` (admin) ou `sergio` (auditor)
+- Password : voir gestionnaire de mots de passe interne
+
+La page **📤 Auto-audit (upload CSV)** fonctionne immédiatement sans configuration Postgres : upload de CSV → classification automatique → audit Claude → pack Excel BQ téléchargeable.
 
 ---
 

@@ -1,0 +1,36 @@
+Copyright (c) 2026 Atlas For Men
+
+All Rights Reserved.
+
+This software, including its source code, documentation, audit grids, prompts
+templates, methodology, and any associated assets, is the proprietary and
+confidential property of Atlas For Men. It contains business intellectual
+property (call quality evaluation methodology, scoring grids, customer
+interaction patterns) and infrastructure configuration that must not be
+disclosed outside the company without prior written authorization.
+
+NO PART OF THIS REPOSITORY MAY BE :
+  - Forked, copied, redistributed, sublicensed, or sold
+  - Used to train any machine learning model
+  - Disclosed to third parties without written consent
+  - Used to process customer personal data (recordings, transcripts) outside
+    the European Union, per GDPR requirements
+
+Authorized internal use only by Atlas For Men employees and contractually
+engaged service providers, for the purpose of operating the call quality
+audit pipeline described in this repository.
+
+For licensing, partnership, or any other inquiry :
+contact dev@regardbeauty.com.
+
+──────────────────────────────────────────────────────────────────────────────
+GDPR notice — this software processes voice recordings and transcripts that
+constitute personal data (and, for voice, biometric data per art. 9 GDPR).
+Any deployment must :
+  - Be hosted in the European Union (Paris or Amsterdam regions)
+  - Sign DPAs (Data Processing Agreements) with all third-party processors
+    (Anthropic, HappyScribe, Scaleway, etc.)
+  - Anonymize PII before any LLM call where possible
+  - Provide a process for the customer's right to be forgotten
+    (anonymisation via the B2T API `AnonymisationCustomer` operation)
+──────────────────────────────────────────────────────────────────────────────
