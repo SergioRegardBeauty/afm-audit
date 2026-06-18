@@ -103,6 +103,6 @@ Limitations connues v1 : transcript-only (pas d'audio), pas de gold standard hum
 
 - État réel des inputs/livrables : [`README.md`](README.md) et [`kickoff/CHECKLIST.md`](kickoff/CHECKLIST.md)
 - Résultats du run v1 + patterns détectés : [`output/SUMMARY.md`](output/SUMMARY.md)
-- Audit initial du portail Dialoga (numéros, IVR, queues, KPIs) : [`Audit_Dialoga_AtlasForMen_2026-05-10 (1).md`](Audit_Dialoga_AtlasForMen_2026-05-10%20(1).md)
+- Audit initial du portail Dialoga (numéros, IVR, queues, KPIs) : [`docs/audit_dialoga_2026-05-10.md`](docs/audit_dialoga_2026-05-10.md)
 - Workflow n8n détaillé : [`n8n/README.md`](n8n/README.md)
 - Guides setup (Docker, Anthropic, Drive, Postgres, S3, ASR) : [`kickoff/guides/`](kickoff/guides/)

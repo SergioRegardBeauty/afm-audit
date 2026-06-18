@@ -1,143 +1,209 @@
 # Atlas For Men — Audit IA des appels service client
 
-Pipeline d'audit qualité IA des appels téléphoniques **Atlas For Men** (Cde Tél + SAV) sur les marchés FR, GB, DE, PL, CZ. Génère des audits structurés selon les grilles AFM `BQ_1_CdesTel` et `BQ_4_Sav`.
+Pipeline d'audit qualité IA des appels téléphoniques **Atlas For Men** (Commande Tél + SAV) sur les 5 marchés européens. Audit selon les grilles officielles AFM `BQ_1_CdesTel` (15 critères) et `BQ_4_Sav` (16 critères), via Claude Sonnet 4.6.
 
-> ⚠️ **Repo privé — propriétaire**. Contient des prompts et de la méthodologie métier confidentielle. Ne pas forker / partager.
+> ⚠️ **Repo privé Atlas For Men**. Contient prompts métier, méthodologie d'audit et configuration d'infrastructure. **Données clients (transcripts, recordings, audits remplis) jamais commit dans Git** — exigence RGPD documentée dans `.gitignore`.
 
-## Vue d'ensemble
+---
 
-- **Volume traitable** : ~5500 transcripts (1 mois de données Dialoga, 5 pays)
-- **LLM** : Anthropic Claude Sonnet 4.6
-- **Grilles** : 15 critères Cde Tél (BQ_1), 16 critères SAV (BQ_4)
-- **3 phases projet** : Conception → Test 100 appels (Dialoga flow isolé) → Prod 50%+
+## 🎯 Vue d'ensemble
 
-## Architecture
+Atlas For Men gère **~5 500 appels téléphoniques par mois** sur 5 marchés (FR, GB, DE, PL, CZ), répartis entre :
+- 🛒 **Commande Tél** : nouvelle commande par téléphone
+- 🛠️ **SAV** : suivi commande, remboursement, réclamation
+
+Le projet automatise l'**audit qualité** de ces appels en :
+1. Ingérant les transcripts CSV produits par HappyScribe (via n8n)
+2. Classifiant chaque appel (pays + flow Cde Tél / SAV)
+3. Lançant Claude Sonnet 4.6 sur chaque transcript avec la grille AFM
+4. Produisant un fichier Excel BQ rempli (1 par pays × flow) avec scores critère par critère
+
+Objectif final : **un IVR augmenté IA** déployé silencieusement sur 50 % du trafic Atlas, conçu à partir des patterns d'intents extraits du corpus audité.
+
+---
+
+## 📊 Statut d'avancement
+
+| Phase | Statut | Détail |
+|---|---|---|
+| **0 — Cadrage** | ✅ Fait | Audit Dialoga + inventaire 459 services + 196 agents + grilles AFM |
+| **1 — Conception (audit IA)** | 🟢 En cours | **2 202 / 5 533 audits livrés** (40 %, run v1 partiel par rate-limit Anthropic) |
+| **1bis — Calibration humaine** | 🟡 Bloqué | En attente des **5-10 audits humains de référence** (cf. `kickoff/CHECKLIST.md` #9) |
+| **2 — Test 100 appels live** | ⏳ Pas démarré | Nécessite Phase 1 + 1bis validées (audits IA ≥ 90 % d'accord avec grille humaine) |
+| **3 — Déploiement progressif** | ⏳ Pas démarré | 5 % → 20 % → 50 % du trafic Atlas, kill switch sur dérive qualité |
+
+**Cible totale** : 10–14 semaines pour atteindre 50 % du trafic.
+
+---
+
+## 🏗️ Architecture
 
 ```
-┌─────────────────────┐
-│  Drive folder       │   transcripts CSV + recordings MP3 (Dialoga)
-│  (data, hors repo)  │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────────────────────────┐
-│  Pipeline d'audit (ce repo)             │
-│  ├── pipeline/        (Python scripts)  │
-│  ├── prompts/         (grilles IA)      │
-│  ├── n8n/             (workflows)       │
-│  └── kickoff/         (infra & guides)  │
-└──────────┬──────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────┐
-│  Outputs (hors repo, sur Drive/DB)      │
-│  - Google Sheet : 10 onglets/pays-flux  │
-│  - Excel BQ_1/BQ_4 par pays remplis     │
-│  - JSON par audit (avec justifications) │
-│  - Postgres : transcripts + audits      │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  Source — Drive folder (hors repo, RGPD)                             │
+│  ├── Transcription MP3/   5 538 CSV HappyScribe (5 pays)             │
+│  └── Audio MP3/           15 637 MP3 (recordings Dialoga, ~3.2 GB)   │
+└─────────────────────────────────┬────────────────────────────────────┘
+                                  │
+                                  ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  Pipeline d'audit IA — ce repo                                       │
+│                                                                      │
+│  pipeline/         Scripts Python séquentiels                        │
+│    ├── classify_and_sample.py     CSV → Cde Tél / SAV / Unknown      │
+│    ├── auto_na_audits.py          NA auto pour <500 B (silences)     │
+│    ├── make_subagent_chunks.py    Découpe en chunks pour subagents   │
+│    └── fill_excel.py              JSON audits → Excel BQ par pays    │
+│                                                                      │
+│  prompts/          IP métier — grilles AFM officielles               │
+│    ├── audit_cde_tel_v1.md        15 critères Commande Tél           │
+│    └── audit_sav_v1.md            16 critères SAV                    │
+│                                                                      │
+│  n8n/              Workflow LangChain Drive → Claude → Sheets        │
+│  kickoff/          Setup + repo prod-ready (Postgres + S3 + UI)      │
+│  tools/            Scripts d'introspection / migration ponctuels     │
+└─────────────────────────────────┬────────────────────────────────────┘
+                                  │
+                                  ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  Outputs (hors repo, RGPD)                                           │
+│  ├── output/<PAYS>/BQ_*.xlsx      Excels remplis par pays            │
+│  ├── audits_ia/v1/<PAYS>/<flow>/  2 202 JSON d'audit (1 par appel)   │
+│  ├── Google Sheet                 10 onglets pays × flow (live)      │
+│  └── Postgres (Supabase / local)  5 473 transcripts + audits IA      │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-## Structure du repo
+---
 
-| Dossier | Rôle |
-|---------|------|
-| `pipeline/` | Scripts Python : classification, échantillonnage, remplissage Excel |
-| `prompts/` | Prompts AFM Cde Tél (v1) + SAV (v1) — IP métier |
-| `n8n/` | Workflow n8n (Drive → Claude → Sheets) + Apps Script pour onglets |
-| `kickoff/` | Squelette repo Python prod (Docker, Postgres, S3) + guides setup |
-| `Audit_Dialoga_AtlasForMen_2026-05-10 (1).md` | Audit initial portail Dialoga (numéros, IVR, queues, agents, KPIs) |
-| `BQ_1_CdesTel_10 (2).xlsx` | Template AFM Cde Tél (vide) |
-| `BQ_4_Sav_10_ (2).xlsx` | Template AFM SAV (vide) |
+## 🚀 Quick start
 
-## Ce qui est EXCLU du repo (RGPD + secret métier)
+### Pour explorer le code (5 min)
 
-- ❌ Transcripts CSV bruts (dossiers `Atlas FR/`, `Atlas EN/`, etc.)
-- ❌ Audits JSON générés (`audits_ia/v1/`, `output/<PAYS>/audits_json/`)
-- ❌ Excel remplis avec données clients (`output/<PAYS>/BQ_*.xlsx`)
-- ❌ Recordings MP3
-- ❌ Service account JSON, clés API (`.env`, `service_account.json`)
-- ❌ Snapshots Dialoga
+```bash
+git clone https://github.com/SergioRegardBeauty/afm-audit.git
+cd afm-audit
+cat README.md kickoff/CHECKLIST.md output/SUMMARY.md
+```
 
-Voir `.gitignore` pour la liste exhaustive.
+### Pour lancer l'interface web Streamlit (15 min)
 
-## Démarrage rapide
-
-### 1. Cloner et installer Python deps
+L'interface multi-user permet à 5–10 collègues de lancer leurs audits eux-mêmes :
 
 ```powershell
-git clone git@github.com:<TON_USER>/afm-audit.git
-cd afm-audit
+cd kickoff/repo_skeleton
+
+# 1. Postgres local via Docker
+docker compose up -d postgres
+
+# 2. Environnement Python
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r kickoff/repo_skeleton/requirements.txt
+pip install -r requirements.txt
+
+# 3. .env (copier .env.example et remplir ANTHROPIC_API_KEY)
+copy .env.example .env
+
+# 4. Ingérer les 5 538 CSV dans Postgres
+python scripts/ingest_local_transcripts.py --root "../../Transcription MP3" --use-manifest
+
+# 5. Lancer l'interface web
+streamlit run app/streamlit_app.py
+# → http://localhost:8501
 ```
 
-### 2. Variables d'environnement
+Détails dans [`kickoff/repo_skeleton/SETUP_POSTGRES.md`](kickoff/repo_skeleton/SETUP_POSTGRES.md).
+
+### Pour déployer en production sur Scaleway (Paris, RGPD EU)
+
+Voir [`kickoff/repo_skeleton/DEPLOY_CLOUD.md`](kickoff/repo_skeleton/DEPLOY_CLOUD.md). Budget ~21 €/mois infra fixe + API Anthropic à l'usage.
+
+### Pour pipeliner sans UI (audit massif backend)
 
 ```powershell
-cp kickoff/repo_skeleton/.env.example .env
-# Editer .env avec ANTHROPIC_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, ...
+python pipeline\auto_na_audits.py          # NA auto pour <500B
+python pipeline\classify_and_sample.py     # Cde Tél vs SAV + manifest
+python pipeline\make_subagent_chunks.py    # Chunks pour subagents
+# … lancer audits IA via n8n ou subagents Claude …
+python pipeline\fill_excel.py              # JSON → Excel BQ par pays
 ```
 
-### 3. Récupérer les données (hors repo)
+---
 
-- Placer les transcripts CSV dans `corpus/` (gitignored) OU les laisser sur Google Drive
-- Service account Google Drive (cf. `kickoff/guides/04_google_drive_service_account.md`)
+## 📈 Résultats du run v1 (livraison partielle)
 
-### 4. Lancer un audit
+D'après [`output/SUMMARY.md`](output/SUMMARY.md) :
 
-```powershell
-# Via Python local
-python pipeline/classify_and_sample.py
-python pipeline/fill_excel.py
+| Pays | Cde Tél audités | SAV audités | Total audités | Disponible |
+|------|---:|---:|---:|---:|
+| FR | 775 | 370 | **1 145** | 2 465 |
+| GB | 711 | 47 | **758** | 1 887 |
+| DE | 185 | 69 | **254** | 1 124 |
+| PL | 20 | 3 | **23** | 33 |
+| CZ | 19 | 3 | **22** | 24 |
+| **Total** | **1 710** | **492** | **2 202** | **5 533** |
 
-# OU via n8n (recommandé pour automatisation)
-# Cf. n8n/README.md
-```
+**Patterns systémiques détectés** (cf. `output/SUMMARY.md`) :
+- Accueil normé Atlas For Men : < 15 % de conformité (mais l'ASR Dialoga le transcrit mal massivement, donc à valider avec audio)
+- Prise de congé normée : < 10 %
+- Rebond commercial GB Cde Tél : ~50 % de SI (1 seule proposition au lieu de 2)
+- PCI-DSS : annonce "I'll secure the line" présente, mais réactivation enregistrement quasi-jamais explicite
 
-## Méthodologie d'audit
+**Tous les SI doivent être revus manuellement** par un superviseur avec l'enregistrement audio avant toute action RH.
 
-Voir `kickoff/CHECKLIST.md` pour la checklist complète et les 7 guides détaillés.
+---
 
-3 phases :
+## 🧱 Stack technique
 
-1. **Conception** : analyse historique + calibration sur gold standard humain (5-10 audits manuels)
-2. **Test** : 100 appels routés via flow Dialoga isolé → audit IA → comparaison vs gold standard
-3. **Production** : déploiement silencieux 50%+ trafic, kill switch si dérive qualité
+| Composant | Choix | Pourquoi |
+|---|---|---|
+| LLM | Anthropic Claude Sonnet 4.6 | Qualité grille AFM, multilingue (FR/EN/DE/PL/CZ) |
+| ASR existant | HappyScribe (Whisper) | Transcripts CSV déjà produits par Sergio via n8n |
+| Orchestration audit | n8n workflow + scripts Python | Trigger Drive → Claude → Sheets, ou pipeline manuel |
+| Base de données | Postgres 16 + pgvector | Stockage transcripts + audits, prêt clustering embeddings |
+| Stockage objet | MinIO local / Scaleway S3 EU | Backup CSV + MP3 dans bucket privé EU |
+| Interface web | Streamlit + bcrypt + cookies | UI multi-user simple, déployable sur Streamlit Cloud ou VM |
+| Hébergement | Local Docker → Scaleway Paris | RGPD EU obligatoire (recordings = PII voix) |
 
-## Coûts estimés
+---
 
-| Service | Mensuel | Total projet |
-|---------|---------|--------------|
-| Anthropic Claude (5533 audits) | — | ~110 € |
-| Scaleway Postgres DB-DEV-S | 15 € | — |
-| Scaleway Object Storage 50 GB | 1 € | — |
-| Deepgram (optionnel, si retranscription) | — | ~90 € |
+## 📚 Documentation détaillée
 
-## Compliance
+- **[`kickoff/CHECKLIST.md`](kickoff/CHECKLIST.md)** — Indispensables avant de lancer + statut de chaque pré-requis
+- **[`output/SUMMARY.md`](output/SUMMARY.md)** — Résultats détaillés du run v1 (patterns, limitations, SI)
+- **[`docs/audit_dialoga_2026-05-10.md`](docs/audit_dialoga_2026-05-10.md)** — Audit du portail Dialoga (459 services, 196 agents, capacités IA dispo)
+- **[`docs/B2T_API_DISCOVERY.md`](docs/B2T_API_DISCOVERY.md)** — Discovery complet de l'API CRM B2T Atlas (28 opérations SOAP)
+- **[`kickoff/repo_skeleton/SETUP_POSTGRES.md`](kickoff/repo_skeleton/SETUP_POSTGRES.md)** — Procédure setup DB locale + ingestion 5 538 CSV
+- **[`kickoff/repo_skeleton/DEPLOY_CLOUD.md`](kickoff/repo_skeleton/DEPLOY_CLOUD.md)** — Déploiement Scaleway (Postgres + VM + Streamlit + HTTPS)
+- **[`GITHUB_SETUP.md`](GITHUB_SETUP.md)** — Procédure clone repo + pre-commit hook anti-PII
+- **[`n8n/README.md`](n8n/README.md)** — Workflow LangChain ChainLlm détaillé
+- **[`kickoff/guides/`](kickoff/guides/)** — 7 guides setup (Docker, Anthropic, Drive, Postgres, S3, ASR)
+- **[`CLAUDE.md`](CLAUDE.md)** — Guide pour les sessions Claude Code futures
+- **[`AGENTS.md`](AGENTS.md)** — Configuration n8n-as-code
 
-- **RGPD** : hébergement EU obligatoire (Postgres + S3 Scaleway région Paris/Amsterdam)
-- **Traçabilité** : table `audit_log` Postgres pour qui lit quoi
-- **Service account Drive** : lecture seule sur les dossiers ciblés uniquement
-- **Pas de PII dans le repo Git** (le `.gitignore` couvre, vérifier avant chaque push)
+---
 
-## Status livraisons à date
+## 🔒 RGPD & sécurité
 
-- ✅ v1 partiel : 2202 audits livrés (40 % du corpus)
-- ⏳ v2 cible : 5533 audits + calibration humaine + Postgres EU + S3
-- 📋 Voir `kickoff/CHECKLIST.md` pour les indispensables à finaliser cette semaine
+Le `.gitignore` exclut **toutes les données PII** :
+- Recordings MP3 (voix clients = donnée biométrique RGPD art. 9)
+- Transcripts CSV (contiennent noms, adresses, n° commande)
+- Audits JSON et Excel remplis (contiennent PII des transcripts)
+- Secrets : `.env`, `service_account*.json`, `users.yaml`
+- Dumps SQL pouvant contenir PII
 
-## Stack technique
+Un **pre-commit hook** (`.git-hooks/pre-commit`) bloque tout commit accidentel de ces fichiers. À activer après clone : `git config core.hooksPath .git-hooks`.
 
-- Python 3.11+
-- Anthropic SDK
-- google-api-python-client (Drive)
-- psycopg + SQLAlchemy (Postgres)
-- boto3 (S3-compatible)
-- n8n (orchestration low-code)
-- Docker Compose (POC local)
+Hébergement obligatoire : **Union Européenne** (Paris ou Amsterdam) — Scaleway choisi par défaut.
 
-## Licence
+---
 
-Code propriétaire. Tous droits réservés. Aucune distribution sans autorisation écrite.
+## 👥 Équipe
+
+- **Owner projet** : Djibril (dev@regardbeauty.com)
+- **Pipeline n8n + transcripts** : Sergio Hazary (sergiohazary@gmail.com)
+- **Stack IA** : Claude Sonnet 4.6 (Anthropic) — clé API Anthropic requise
+
+---
+
+_Repo géré avec [Claude Code](https://claude.com/claude-code) (Anthropic) — assistance technique sur la pipeline + l'infrastructure._
